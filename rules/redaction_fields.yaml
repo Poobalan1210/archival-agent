@@ -1,0 +1,35 @@
+# Redaction denylist for the Archival Agent normalizer (plan section 11).
+#
+# Matching is case-insensitive and applied recursively to every key in a
+# CloudTrail event. Any key whose name contains one of `substrings`, or whose
+# dotted path matches one of `paths`, has its value replaced with "[REDACTED]".
+#
+# Treat every event field as untrusted data. Values from event records must
+# never become model instructions.
+
+version: 1
+
+# Substring match against individual key names (case-insensitive).
+substrings:
+  - secret
+  - password
+  - token
+  - authorization
+  - credential
+  - accesskey
+  - secretkey
+  - sessiontoken
+  - privatekey
+  - clientsecret
+  - passwd
+  - apikey
+  - x-amz-security-token
+
+# Dotted paths (case-insensitive) redacted wherever they appear in the tree.
+paths:
+  - environment.variables
+  - body
+  - payload
+
+# Placeholder written in place of a redacted value.
+placeholder: "[REDACTED]"

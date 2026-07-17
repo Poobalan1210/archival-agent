@@ -1,0 +1,98 @@
+# Recommendation policy for the deterministic validator (plan sections 17-18).
+#
+# The validator enforces these rules against the model's structured output. Any
+# violation triggers the deterministic fallback report.
+
+version: 1
+
+# Maximum number of recommendations allowed in one report.
+max_recommendations: 5
+
+# Only these recommendation categories are accepted.
+allowed_categories:
+  - OPERATIONAL_FOLLOW_UP
+  - FAILED_DEPLOYMENT
+  - RESOURCE_CLEANUP_REVIEW
+  - SECURITY_REVIEW
+  - RELIABILITY
+  - DOCUMENTATION
+  - COST_AWARENESS
+  - KNOWLEDGE_GAP
+
+# Allowed recommendation priorities.
+allowed_priorities:
+  - HIGH
+  - MEDIUM
+  - LOW
+
+# Recommendations must require human review; automatic action is never allowed.
+require_human_review: true
+
+# Case-insensitive phrases indicating destructive or mutating ADVICE (checked
+# against a recommendation's title and suggested next step only, so that
+# describing a past failure like "the delete failed" is not flagged). Phrases
+# are imperative to target instructions to destroy, not descriptions of events.
+destructive_phrases:
+  - delete the
+  - delete all
+  - delete this
+  - terminate the
+  - terminate all
+  - terminate this
+  - remove the
+  - drop the
+  - drop table
+  - destroy the
+  - destroy this
+  - shut down
+  - shutdown
+  - stop the instance
+  - stop all
+  - disable logging
+  - disable cloudtrail
+  - disable guardduty
+  - revoke the
+
+# Case-insensitive phrases indicating permission expansion, which is disallowed.
+permission_expansion_phrases:
+  - grant administrator
+  - administratoraccess
+  - full access
+  - "*:*"
+  - allow all
+  - disable scp
+  - remove permission boundary
+  - remove permissions boundary
+  - open the security group
+  - 0.0.0.0/0
+  - make public
+  - grant admin
+
+# Phrases that assert a before/after or cost value. Allowed ONLY when the
+# recommendation cites evidence event IDs; the validator cross-checks this.
+quantitative_claim_phrases:
+  - increased from
+  - decreased from
+  - changed from
+  - "$"
+  - "usd"
+  - per month
+  - per hour
+  - reduced cost
+  - saved
+
+# Human-readable examples surfaced in documentation / prompts.
+allowed_examples:
+  - Review the first failed CloudFormation event.
+  - Confirm whether a temporary resource is still required.
+  - Record a manual console change in Infrastructure as Code.
+  - Confirm that a security-group change was intentional.
+  - Review repeated failures affecting the same resource.
+
+disallowed_examples:
+  - Grant administrator permissions.
+  - Disable an SCP.
+  - Open a security group broadly.
+  - Delete or stop resources automatically.
+  - Execute CLI commands.
+  - Claim a cost value without deterministic pricing evidence.

@@ -1,0 +1,39 @@
+# Archival Agent demo configuration (plan section 7, Phase 7).
+#
+# scenario_runner.py performs a set of safe, real AWS operations so the next
+# scheduled run has genuine CloudTrail activity to analyze. cleanup.py removes
+# everything again. Every resource is prefixed and tagged so it is unambiguous
+# and safe to delete.
+
+# Region where demo resources are created (the audited workload region).
+region: ap-south-1
+
+# All demo resource names start with this prefix. cleanup.py refuses to delete
+# anything that does not.
+prefix: archival-agent-demo-
+
+# Tag applied to every taggable demo resource.
+tag_key: "archival-agent:demo"
+tag_value: "true"
+
+# Documentation/test IP range (TEST-NET-1, RFC 5737) used for the harmless
+# security-group rule. Never a real/public range.
+doc_cidr: "192.0.2.0/24"
+doc_port: 443
+
+# Toggle individual scenarios on/off.
+scenarios:
+  sqs_queue: true            # create + tag an SQS queue
+  lambda_update: false       # update a demo Lambda's config (requires existing fn)
+  cfn_success: true          # deploy a small successful CloudFormation stack
+  cfn_failure: true          # deploy a stack that intentionally rolls back
+  security_group: true       # add a doc-range rule to an unattached demo SG
+  network_change: true       # add an ingress rule, then a duplicate that fails
+  sqs_modify: true           # change the demo queue's configuration
+
+# Optional: name of an existing Lambda to reconfigure for the lambda_update
+# scenario. Must start with the prefix. Leave empty to skip.
+lambda_function_name: ""
+
+# Optional VPC ID for the security-group scenario. Empty uses the default VPC.
+vpc_id: ""

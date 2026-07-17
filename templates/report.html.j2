@@ -1,0 +1,228 @@
+{#- Detailed Archival Agent report (plan section 19). Autoescaping is ON. -#}
+{% macro badge(text, kind) -%}
+<span class="badge badge-{{ kind }}">{{ text }}</span>
+{%- endmacro %}
+{% macro priority_badge(p) -%}
+{% set kind = 'high' if p|string == 'HIGH' else ('med' if p|string == 'MEDIUM' else 'low') %}
+<span class="badge badge-{{ kind }}">{{ p }}</span>
+{%- endmacro %}
+{#- Event tables are wrapped in a fixed-height scroll container with a sticky
+    header so long tables never stretch the page. -#}
+{% macro event_table(events) -%}
+<div class="table-scroll">
+<table class="events">
+  <thead>
+    <tr><th>Time (UTC)</th><th>Region</th><th>Service</th><th>Operation</th><th>Actor</th><th>Result</th><th>Resources</th><th>Event ID</th></tr>
+  </thead>
+  <tbody>
+  {% for e in events %}
+    <tr class="{{ 'row-failed' if e.is_failure() else '' }}">
+      <td class="mono">{{ e.event_time.strftime('%H:%M:%S') }}</td>
+      <td>{{ e.region }}</td>
+      <td>{{ e.event_source.split('.')[0] }}</td>
+      <td>{{ e.event_name }}</td>
+      <td>{{ e.principal.name or e.principal.type or '-' }}</td>
+      <td>{{ badge('FAILED', 'high') if e.is_failure() else badge('ok', 'low') }}</td>
+      <td>{{ e.resource_names() | join(', ') or '-' }}</td>
+      <td class="mono small">{{ e.event_id }}</td>
+    </tr>
+  {% else %}
+    <tr><td colspan="8" class="empty">No events in this section.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{%- endmacro %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Archival Agent Report — {{ meta.report_date }}</title>
+<style>
+  :root { --fg:#1a2330; --muted:#5b6b7f; --line:#e2e8f0; --bg:#f7f9fc; --accent:#1f6feb; }
+  * { box-sizing: border-box; }
+  body { font-family: -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; color: var(--fg); background: var(--bg); margin: 0; line-height: 1.5; }
+  .wrap { max-width: 960px; margin: 0 auto; padding: 24px; }
+  header.top { background: linear-gradient(135deg,#0b2545,#1f6feb); color:#fff; padding: 28px 24px; border-radius: 12px; }
+  header.top h1 { margin: 0 0 6px; font-size: 24px; }
+  header.top .sub { opacity: .9; font-size: 14px; }
+  h2 { font-size: 18px; margin-top: 34px; padding-bottom: 6px; border-bottom: 2px solid var(--line); }
+  h3 { font-size: 15px; margin: 18px 0 8px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+  .count { color: var(--muted); font-weight: 400; font-size: 14px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit,minmax(160px,1fr)); gap: 12px; }
+  .card { background:#fff; border:1px solid var(--line); border-radius: 10px; padding: 14px; }
+  .card .n { font-size: 26px; font-weight: 700; }
+  .card .l { font-size: 12px; color: var(--muted); }
+
+  /* Scroll container for long tables; keeps the header visible while scrolling. */
+  .table-scroll { max-height: 420px; overflow: auto; border: 1px solid var(--line); border-radius: 8px; background:#fff; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .table-scroll table { border: none; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { background:#eef2f7; font-size: 12px; text-transform: uppercase; letter-spacing: .03em; color: var(--muted); }
+  .table-scroll thead th { position: sticky; top: 0; z-index: 1; box-shadow: 0 1px 0 var(--line); }
+  tr.row-failed { background: #fff5f5; }
+  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .small { font-size: 11px; color: var(--muted); }
+  .empty { color: var(--muted); text-align:center; font-style: italic; }
+  ul { margin: 6px 0; padding-left: 20px; }
+  .badge { display:inline-block; padding:2px 8px; border-radius: 999px; font-size: 11px; font-weight:700; }
+  .badge-high { background:#ffe3e3; color:#b42318; }
+  .badge-med { background:#fff3cd; color:#8a6d00; }
+  .badge-low { background:#e3f5e8; color:#1a7f37; }
+  .badge-ok { background:#e3f5e8; color:#1a7f37; }
+  .rec { background:#fff; border:1px solid var(--line); border-left:4px solid var(--accent); border-radius: 8px; padding: 12px 14px; margin: 10px 0; }
+  .rec .t { font-weight: 700; }
+  .rec .meta { font-size: 12px; color: var(--muted); margin: 4px 0; }
+  .pill { display:inline-block; background:#eef2f7; border-radius:6px; padding:1px 7px; font-size:12px; margin-right:4px; }
+  .note { background:#fffbe6; border:1px solid #ffe58f; padding:10px 12px; border-radius:8px; font-size:13px; }
+  /* Scroll container for the AI episode analyses when there are many. */
+  .card-scroll { max-height: 640px; overflow-y: auto; padding-right: 4px; }
+  .appendix { margin-top: 44px; padding-top: 8px; border-top: 3px solid var(--line); }
+  .appendix-intro { color: var(--muted); font-size: 13px; margin: 6px 0 0; }
+  footer { margin-top: 36px; color: var(--muted); font-size: 12px; text-align:center; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="top">
+    <h1>Archival Agent — Daily AWS Operations Report</h1>
+    <div class="sub">
+      Account {{ meta.account_id }} · Report date {{ meta.report_date }} ·
+      {{ badge(coverage.status, 'high' if coverage.partial else 'ok') }}
+    </div>
+    <div class="sub">{{ report.headline }}</div>
+  </header>
+
+  {# 1. Scope and status #}
+  <h2>1. Scope &amp; collection status</h2>
+  <div class="grid">
+    <div class="card"><div class="l">Local window</div><div>{{ meta.window_local }}</div></div>
+    <div class="card"><div class="l">UTC window</div><div>{{ meta.window_utc }}</div></div>
+    <div class="card"><div class="l">Audit regions</div><div>{{ meta.audit_regions | join(', ') }}</div></div>
+    <div class="card"><div class="l">Collection</div><div>{{ badge(coverage.status, 'high' if coverage.partial else 'ok') }}</div></div>
+  </div>
+  {% if coverage.partial %}
+  <p class="note">Collection was PARTIAL. The following regions failed and are not represented:
+    {% for f in coverage.failed_regions %}<span class="pill">{{ f.region }} ({{ f.error }})</span>{% endfor %}
+  </p>
+  {% endif %}
+
+  {# 2. Deterministic totals #}
+  <h2>2. Deterministic totals</h2>
+  <div class="grid">
+    <div class="card"><div class="n">{{ totals.eventsIncluded }}</div><div class="l">Events included</div></div>
+    <div class="card"><div class="n">{{ totals.episodeCount }}</div><div class="l">Episodes</div></div>
+    <div class="card"><div class="n">{{ totals.failedEvents }}</div><div class="l">Failed events</div></div>
+    {% for cat, n in totals.episodesByCategory.items() %}
+    <div class="card"><div class="n">{{ n }}</div><div class="l">{{ cat }}</div></div>
+    {% endfor %}
+  </div>
+
+  {# 3. AI executive summary #}
+  <h2>3. Executive summary</h2>
+  <ul>
+    {% for line in report.executive_summary %}<li>{{ line }}</li>{% endfor %}
+  </ul>
+
+  {# 4. AI episode analyses (scrollable when long) #}
+  <h2>4. Episode analyses <span class="count">({{ report.episode_analyses | length }})</span></h2>
+  <div class="card-scroll">
+  {% for a in report.episode_analyses %}
+    {% set ep = (episodes | selectattr('episode_id','equalto',a.episode_id) | first) %}
+    <div class="rec">
+      <div class="t">{{ a.episode_id }} {{ priority_badge(a.priority) }}
+        {% if ep %}<span class="pill">{{ ep.category }}</span><span class="pill">{{ ep.status }}</span>{% endif %}
+      </div>
+      {% if ep %}<div class="meta">{{ ep.mechanism }} · {{ ep.resources | join(', ') or 'no named resources' }}</div>{% endif %}
+      <ul>{% for fact in a.facts %}<li>{{ fact }}</li>{% endfor %}</ul>
+      {% if a.interpretation %}<div class="meta">Interpretation: {{ a.interpretation }}</div>{% endif %}
+      <div class="small mono">evidence: {{ a.evidence_event_ids | join(', ') or '-' }}</div>
+    </div>
+  {% else %}
+    <p class="empty">No episode analyses.</p>
+  {% endfor %}
+  </div>
+
+  {# 5. AI recommendations #}
+  <h2>5. Recommendations <span class="count">({{ report.recommendations | length }})</span></h2>
+  {% for r in report.recommendations %}
+    <div class="rec">
+      <div class="t">{{ r.title }} {{ priority_badge(r.priority) }} <span class="pill">{{ r.category }}</span></div>
+      <div class="meta">{{ r.rationale }}</div>
+      <div class="meta"><strong>Next step:</strong> {{ r.suggested_next_step }}</div>
+      {% if r.affected_resources %}<div class="meta">Resources: {{ r.affected_resources | join(', ') }}</div>{% endif %}
+      {% if r.assumptions %}<div class="meta">Assumptions: {{ r.assumptions | join('; ') }}</div>{% endif %}
+      <div class="small mono">evidence: {{ r.evidence_event_ids | join(', ') or '-' }} · human review required: {{ r.requires_human_review }}</div>
+    </div>
+  {% else %}
+    <p class="empty">No recommendations.</p>
+  {% endfor %}
+
+  {# 6. Agent execution #}
+  <h2>6. Agent execution</h2>
+  <div class="grid">
+    <div class="card"><div class="l">Framework</div><div>{{ agent_execution.framework }}</div></div>
+    <div class="card"><div class="l">Runtime</div><div>{{ agent_execution.runtime }}</div></div>
+    <div class="card"><div class="l">Model</div><div>{{ agent_execution.model }}</div></div>
+    <div class="card"><div class="l">AI status</div><div>{{ agent_execution.aiStatus }}</div></div>
+    <div class="card"><div class="l">Tools called</div><div>{{ agent_execution.toolsCalled }}</div></div>
+    <div class="card"><div class="l">Fallback used</div><div>{{ 'Yes' if agent_execution.fallbackUsed else 'No' }}</div></div>
+  </div>
+  <p class="small mono">Session: {{ meta.session_id }}</p>
+  {% if agent_execution.validationNotes %}
+  <h3>Validation notes</h3>
+  <ul class="small">{% for v in agent_execution.validationNotes %}<li>{{ v }}</li>{% endfor %}</ul>
+  {% endif %}
+
+  {# 7. Limitations #}
+  <h2>7. Scope &amp; limitations</h2>
+  <ul>
+    {% for lim in report.limitations %}<li>{{ lim }}</li>{% endfor %}
+    <li>Read-only analysis of CloudTrail management events. No data events, no remediation.</li>
+  </ul>
+
+  {# ---------------------------------------------------------------------- #}
+  {# Appendix: the full, lengthy activity tables live here, each scrollable. #}
+  {# ---------------------------------------------------------------------- #}
+  <div class="appendix">
+    <h2>Appendix — activity detail</h2>
+    <p class="appendix-intro">
+      The full event tables are below. Each table scrolls independently, so the
+      raw activity never stretches the report. Event IDs cross-reference the
+      evidence cited above.
+    </p>
+
+    <h3>Deployments <span class="count">({{ sections.deployments | length }})</span></h3>
+    {{ event_table(sections.deployments) }}
+
+    <h3>Resource lifecycle <span class="count">({{ sections.resource_lifecycle | length }})</span></h3>
+    {{ event_table(sections.resource_lifecycle) }}
+
+    <h3>IAM &amp; policy changes <span class="count">({{ sections.iam_policy | length }})</span></h3>
+    {{ event_table(sections.iam_policy) }}
+
+    <h3>Network &amp; configuration changes <span class="count">({{ sections.network | length }})</span></h3>
+    {{ event_table(sections.network) }}
+
+    {% if sections.security %}
+    <h3>Security-relevant changes <span class="count">({{ sections.security | length }})</span></h3>
+    {{ event_table(sections.security) }}
+    {% endif %}
+
+    <h3>Failed operations <span class="count">({{ sections.failed | length }})</span></h3>
+    {{ event_table(sections.failed) }}
+
+    <h3>Full evidence log — operational timeline <span class="count">({{ timeline | length }})</span></h3>
+    <p class="appendix-intro">Every event considered in this report, in chronological order.</p>
+    {{ event_table(timeline) }}
+  </div>
+
+  <footer>
+    Generated {{ generated_at }} · Archival Agent · Strands + Amazon Nova Pro + Bedrock AgentCore Runtime
+  </footer>
+</div>
+</body>
+</html>

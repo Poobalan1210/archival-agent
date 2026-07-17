@@ -1,0 +1,80 @@
+# Request-parameter allowlist for the Archival Agent normalizer (plan section 11).
+#
+# Request fields are EXCLUDED by default. Only keys listed here are retained in
+# the normalized event's `request` object, and only after redaction. This keeps
+# request payloads small and prevents leaking sensitive input to the model.
+#
+# `global` keys are allowed for any event source. `by_source` keys are allowed
+# only for the named event source (e.g. "lambda.amazonaws.com").
+
+version: 1
+
+# Allowed for every event source.
+global:
+  - name
+  - description
+  - state
+  - status
+  - type
+  - action
+  - enabled
+  - policyName
+  - roleName
+  - groupName
+  - userName
+  - functionName
+  - bucketName
+  - queueName
+  - topicName
+  - clusterName
+  - tableName
+  - keyId
+  - resourceType
+  - resourceArn
+  - tags
+  - cidr
+  - cidrIp
+  - cidrIpv6
+  - protocol
+  - fromPort
+  - toPort
+  - ipPermissions
+  - ruleAction
+  - dryRun
+
+# Allowed only for the specified event source.
+by_source:
+  lambda.amazonaws.com:
+    - memorySize
+    - timeout
+    - runtime
+    - handler
+    - role
+    - layers
+    - architectures
+  cloudformation.amazonaws.com:
+    - stackName
+    - stackId
+    - changeSetName
+    - templateDescription
+    - capabilities
+    - disableRollback
+  ec2.amazonaws.com:
+    - instanceType
+    - instanceId
+    - imageId
+    - groupId
+    - vpcId
+    - subnetId
+  iam.amazonaws.com:
+    - policyDocument
+    - policyArn
+    - permissionsBoundary
+    - path
+  s3.amazonaws.com:
+    - publicAccessBlockConfiguration
+    - policyStatus
+    - accountId
+  kms.amazonaws.com:
+    - keyState
+    - pendingWindowInDays

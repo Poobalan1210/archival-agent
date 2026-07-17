@@ -1,0 +1,90 @@
+{#- Archival Agent summary email (plan section 19). Autoescaping is ON. -#}
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"></head>
+<body style="margin:0;padding:0;background:#f2f4f8;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;color:#1a2330;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f2f4f8;padding:24px 0;">
+    <tr><td align="center">
+      <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:12px;overflow:hidden;">
+        <tr><td style="background:linear-gradient(135deg,#0b2545,#1f6feb);padding:24px;color:#ffffff;">
+          <div style="font-size:20px;font-weight:700;">Archival Agent — Daily AWS Report</div>
+          <div style="font-size:13px;opacity:.9;margin-top:4px;">
+            Account {{ meta.account_id }} · {{ meta.report_date }} ·
+            <span style="background:{{ '#ffe3e3' if coverage.partial else '#e3f5e8' }};color:{{ '#b42318' if coverage.partial else '#1a7f37' }};padding:2px 8px;border-radius:999px;font-size:11px;font-weight:700;">{{ coverage.status }}</span>
+          </div>
+        </td></tr>
+
+        <tr><td style="padding:20px 24px 8px;">
+          <div style="font-size:15px;font-weight:600;">{{ report.headline }}</div>
+        </td></tr>
+
+        <tr><td style="padding:8px 24px;">
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+            <tr>
+              <td align="center" style="padding:10px;background:#f7f9fc;border-radius:8px;">
+                <div style="font-size:22px;font-weight:700;">{{ totals.eventsIncluded }}</div>
+                <div style="font-size:11px;color:#5b6b7f;">Events</div>
+              </td>
+              <td style="width:8px;"></td>
+              <td align="center" style="padding:10px;background:#f7f9fc;border-radius:8px;">
+                <div style="font-size:22px;font-weight:700;">{{ totals.episodeCount }}</div>
+                <div style="font-size:11px;color:#5b6b7f;">Episodes</div>
+              </td>
+              <td style="width:8px;"></td>
+              <td align="center" style="padding:10px;background:{{ '#fff5f5' if totals.failedEvents else '#f7f9fc' }};border-radius:8px;">
+                <div style="font-size:22px;font-weight:700;color:{{ '#b42318' if totals.failedEvents else '#1a2330' }};">{{ totals.failedEvents }}</div>
+                <div style="font-size:11px;color:#5b6b7f;">Failures</div>
+              </td>
+            </tr>
+          </table>
+        </td></tr>
+
+        {% if coverage.partial %}
+        <tr><td style="padding:8px 24px;">
+          <div style="background:#fffbe6;border:1px solid #ffe58f;border-radius:8px;padding:10px 12px;font-size:13px;">
+            Collection was PARTIAL. Failed regions:
+            {% for f in coverage.failed_regions %}{{ f.region }}{{ ', ' if not loop.last }}{% endfor %}.
+          </div>
+        </td></tr>
+        {% endif %}
+
+        <tr><td style="padding:8px 24px;">
+          <div style="font-size:13px;font-weight:700;text-transform:uppercase;color:#5b6b7f;letter-spacing:.04em;">Summary</div>
+          <ul style="margin:6px 0;padding-left:20px;font-size:14px;">
+            {% for line in report.executive_summary %}<li>{{ line }}</li>{% endfor %}
+          </ul>
+        </td></tr>
+
+        {% if report.recommendations %}
+        <tr><td style="padding:8px 24px;">
+          <div style="font-size:13px;font-weight:700;text-transform:uppercase;color:#5b6b7f;letter-spacing:.04em;">Top recommendations</div>
+          {% for r in report.recommendations[:3] %}
+          <div style="border-left:4px solid #1f6feb;background:#f7f9fc;border-radius:6px;padding:8px 12px;margin:8px 0;">
+            <div style="font-weight:700;font-size:14px;">{{ r.title }}
+              <span style="background:{{ '#ffe3e3' if r.priority|string=='HIGH' else ('#fff3cd' if r.priority|string=='MEDIUM' else '#e3f5e8') }};color:#333;padding:1px 7px;border-radius:999px;font-size:10px;">{{ r.priority }}</span>
+            </div>
+            <div style="font-size:13px;color:#5b6b7f;margin-top:2px;">{{ r.suggested_next_step }}</div>
+          </div>
+          {% endfor %}
+        </td></tr>
+        {% endif %}
+
+        <tr><td style="padding:16px 24px 24px;">
+          {% if presigned_url %}
+          <a href="{{ presigned_url }}" style="display:inline-block;background:#1f6feb;color:#ffffff;text-decoration:none;padding:12px 20px;border-radius:8px;font-weight:600;font-size:14px;">View the detailed report</a>
+          <div style="font-size:11px;color:#5b6b7f;margin-top:8px;">This link is presigned and expires.</div>
+          {% else %}
+          <div style="font-size:13px;color:#5b6b7f;">The detailed report is stored privately in Amazon S3.</div>
+          {% endif %}
+        </td></tr>
+
+        <tr><td style="padding:16px 24px;background:#f7f9fc;color:#5b6b7f;font-size:11px;">
+          {{ agent_execution.framework }} · {{ agent_execution.model }} · AI status {{ agent_execution.aiStatus }} ·
+          tools called {{ agent_execution.toolsCalled }} · fallback {{ 'yes' if agent_execution.fallbackUsed else 'no' }}
+        </td></tr>
+      </table>
+      <div style="font-size:11px;color:#8a97a8;margin-top:12px;">Archival Agent · unattended run {{ meta.run_id }}</div>
+    </td></tr>
+  </table>
+</body>
+</html>

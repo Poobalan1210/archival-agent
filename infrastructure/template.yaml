@@ -1,0 +1,341 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  Archival Agent - supporting infrastructure (plan sections 20 and 23).
+  Creates the private report bucket, the dispatcher Lambda and its role, the
+  EventBridge Scheduler (disabled by default), the scheduler role, and the
+  AgentCore Runtime execution role. The AgentCore Runtime itself is deployed
+  separately with the AgentCore CLI (direct code deployment) using the
+  RuntimeExecutionRole created here.
+
+Parameters:
+  Timezone:
+    Type: String
+    Default: UTC
+    Description: IANA timezone for the daily schedule and report window (e.g. Asia/Kolkata).
+  ScheduleExpression:
+    Type: String
+    Default: cron(30 1 * * ? *)
+    Description: EventBridge Scheduler expression, interpreted in Timezone.
+  ScheduleState:
+    Type: String
+    Default: DISABLED
+    AllowedValues:
+      - ENABLED
+      - DISABLED
+    Description: Whether the daily schedule is active. Enable only after the runtime is deployed.
+  AuditRegions:
+    Type: CommaDelimitedList
+    Default: us-east-1
+    Description: Regions to audit. us-east-1 is always added by the dispatcher.
+  NovaModelId:
+    Type: String
+    Default: amazon.nova-pro-v1:0
+    Description: Bedrock model ID for the analyst.
+  SesSenderEmail:
+    Type: String
+    Default: ""
+    Description: Verified SES sender identity. Leave empty to skip email.
+  SesRecipientEmail:
+    Type: String
+    Default: ""
+    Description: Verified SES recipient identity. Leave empty to skip email.
+  AgentRuntimeArn:
+    Type: String
+    Default: ""
+    Description: >
+      ARN of the deployed AgentCore Runtime. Leave empty for the first deploy,
+      then update the stack once the runtime is deployed with the AgentCore CLI.
+  ReportBucketName:
+    Type: String
+    Default: ""
+    Description: Optional explicit bucket name. Defaults to archival-agent-<accountId>.
+
+Conditions:
+  HasRuntimeArn: !Not [!Equals [!Ref AgentRuntimeArn, ""]]
+  HasBucketName: !Not [!Equals [!Ref ReportBucketName, ""]]
+
+Globals:
+  Function:
+    Runtime: python3.12
+    MemorySize: 256
+    Timeout: 60
+    Tracing: Active
+
+Resources:
+  # ---------------------------------------------------------------------------
+  # Report storage (plan section 20)
+  # ---------------------------------------------------------------------------
+  ReportBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: !If [HasBucketName, !Ref ReportBucketName, !Sub "archival-agent-${AWS::AccountId}"]
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+            BucketKeyEnabled: true
+      VersioningConfiguration:
+        Status: Enabled
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+      LifecycleConfiguration:
+        Rules:
+          - Id: expire-events
+            Status: Enabled
+            Prefix: ""
+            TagFilters:
+              - Key: artifact
+                Value: events
+            ExpirationInDays: 30
+          - Id: expire-old-versions
+            Status: Enabled
+            NoncurrentVersionExpiration:
+              NoncurrentDays: 30
+          - Id: abort-incomplete-uploads
+            Status: Enabled
+            AbortIncompleteMultipartUpload:
+              DaysAfterInitiation: 7
+
+  ReportBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref ReportBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: "*"
+            Action: "s3:*"
+            Resource:
+              - !GetAtt ReportBucket.Arn
+              - !Sub "${ReportBucket.Arn}/*"
+            Condition:
+              Bool:
+                aws:SecureTransport: "false"
+
+  # ---------------------------------------------------------------------------
+  # AgentCore Runtime execution role (plan section 23 - Runtime role)
+  # Assumed by the AgentCore Runtime; passed to the AgentCore CLI on deploy.
+  # ---------------------------------------------------------------------------
+  RuntimeExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "archival-agent-runtime-${AWS::Region}"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: bedrock-agentcore.amazonaws.com
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+      Policies:
+        - PolicyName: cloudtrail-read
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: cloudtrail:LookupEvents
+                Resource: "*"
+        - PolicyName: bedrock-invoke
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - bedrock:InvokeModel
+                  - bedrock:InvokeModelWithResponseStream
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:bedrock:*::foundation-model/*"
+                  - !Sub "arn:${AWS::Partition}:bedrock:*:${AWS::AccountId}:inference-profile/*"
+        - PolicyName: s3-reports
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: s3:ListBucket
+                Resource: !GetAtt ReportBucket.Arn
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:DeleteObject
+                Resource: !Sub "${ReportBucket.Arn}/account=*"
+        - PolicyName: ses-send
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ses:SendEmail
+                  - ses:SendRawEmail
+                Resource: "*"
+                Condition:
+                  StringEquals:
+                    aws:RequestedRegion: !Ref AWS::Region
+        - PolicyName: ecr-pull
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: ecr:GetAuthorizationToken
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - ecr:BatchGetImage
+                  - ecr:GetDownloadUrlForLayer
+                  - ecr:BatchCheckLayerAvailability
+                Resource: !Sub "arn:${AWS::Partition}:ecr:${AWS::Region}:${AWS::AccountId}:repository/archival-agent"
+        - PolicyName: observability
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                  - logs:DescribeLogStreams
+                Resource: !Sub "arn:${AWS::Partition}:logs:*:${AWS::AccountId}:log-group:/aws/bedrock-agentcore/*"
+              - Effect: Allow
+                Action:
+                  - cloudwatch:PutMetricData
+                  - xray:PutTraceSegments
+                  - xray:PutTelemetryRecords
+                  - xray:GetSamplingRules
+                  - xray:GetSamplingTargets
+                Resource: "*"
+
+  # ---------------------------------------------------------------------------
+  # Dispatcher Lambda (plan section 7) and its role
+  # ---------------------------------------------------------------------------
+  DispatcherLogGroup:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Delete
+    Properties:
+      LogGroupName: /aws/lambda/archival-agent-dispatcher
+      RetentionInDays: 30
+
+  DispatcherRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "archival-agent-dispatcher-${AWS::Region}"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: invoke-runtime
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: bedrock-agentcore:InvokeAgentRuntime
+                Resource: !If
+                  - HasRuntimeArn
+                  - - !Ref AgentRuntimeArn
+                    - !Sub "${AgentRuntimeArn}/*"
+                  - - !Sub "arn:${AWS::Partition}:bedrock-agentcore:${AWS::Region}:${AWS::AccountId}:runtime/*"
+        - PolicyName: logs
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !GetAtt DispatcherLogGroup.Arn
+
+  DispatcherFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: archival-agent-dispatcher
+      CodeUri: ../dispatcher/
+      Handler: handler.handler
+      # A full run is synchronous and can take several minutes; wait for it.
+      Timeout: 900
+      Role: !GetAtt DispatcherRole.Arn
+      Environment:
+        Variables:
+          AGENT_RUNTIME_ARN: !Ref AgentRuntimeArn
+          AGENT_REGION: !Ref AWS::Region
+      LoggingConfig:
+        LogGroup: !Ref DispatcherLogGroup
+
+  # ---------------------------------------------------------------------------
+  # EventBridge Scheduler (plan section 6) - DISABLED until Phase 6
+  # ---------------------------------------------------------------------------
+  SchedulerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "archival-agent-scheduler-${AWS::Region}"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: scheduler.amazonaws.com
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+      Policies:
+        - PolicyName: invoke-dispatcher
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: lambda:InvokeFunction
+                Resource: !GetAtt DispatcherFunction.Arn
+
+  DailySchedule:
+    Type: AWS::Scheduler::Schedule
+    Properties:
+      Name: archival-agent-daily
+      Description: Daily Archival Agent run.
+      State: !Ref ScheduleState
+      FlexibleTimeWindow:
+        Mode: "OFF"
+      ScheduleExpression: !Ref ScheduleExpression
+      ScheduleExpressionTimezone: !Ref Timezone
+      Target:
+        Arn: !GetAtt DispatcherFunction.Arn
+        RoleArn: !GetAtt SchedulerRole.Arn
+        RetryPolicy:
+          MaximumRetryAttempts: 2
+        Input: !Sub
+          - '{"jobType":"DAILY_ARCHIVAL","timezone":"${TZ}","auditRegions":["${Regions}"],"force":false}'
+          - TZ: !Ref Timezone
+            Regions: !Join ['","', !Ref AuditRegions]
+
+Outputs:
+  ReportBucketName:
+    Description: Private S3 bucket for report artifacts.
+    Value: !Ref ReportBucket
+  RuntimeExecutionRoleArn:
+    Description: Pass this to the AgentCore CLI as the runtime execution role.
+    Value: !GetAtt RuntimeExecutionRole.Arn
+  DispatcherFunctionArn:
+    Description: Dispatcher Lambda ARN.
+    Value: !GetAtt DispatcherFunction.Arn
+  ScheduleName:
+    Description: EventBridge schedule name (enable after deploying the runtime).
+    Value: !Ref DailySchedule
+  NovaModelIdOut:
+    Description: Model ID configured for the analyst.
+    Value: !Ref NovaModelId

@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Local artifacts
+*.log
+.DS_Store
+local_artifacts/
+*.local.json
+demo/.demo_state.json
+
+# SAM / build
+.aws-sam/
+samconfig.toml
+packaged.yaml
+
+# Secrets / parameters
+infrastructure/parameters.json
+.env
+
+# Deploy artifacts
+deploy/.runtime_arn
+
+# Blog drafts (not part of the source)
+blog/

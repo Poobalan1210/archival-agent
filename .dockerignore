@@ -1,0 +1,23 @@
+# Keep the build context small; the Dockerfile only needs agent/, prompts/,
+# rules/, and templates/.
+.venv/
+venv/
+env/
+__pycache__/
+*.pyc
+*.pyo
+.git/
+.gitignore
+.aws-sam/
+infrastructure/
+dispatcher/
+demo/
+deploy/
+plan.md
+*.md
+samconfig.toml
+packaged.yaml
+.demo_state.json
+local_artifacts/
+*.log
+.DS_Store

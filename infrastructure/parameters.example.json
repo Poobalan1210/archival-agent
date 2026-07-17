@@ -1,0 +1,10 @@
+[
+  { "ParameterKey": "Timezone", "ParameterValue": "Asia/Kolkata" },
+  { "ParameterKey": "ScheduleExpression", "ParameterValue": "cron(30 1 * * ? *)" },
+  { "ParameterKey": "AuditRegions", "ParameterValue": "ap-south-1,us-east-1" },
+  { "ParameterKey": "NovaModelId", "ParameterValue": "amazon.nova-pro-v1:0" },
+  { "ParameterKey": "SesSenderEmail", "ParameterValue": "archival-agent@example.com" },
+  { "ParameterKey": "SesRecipientEmail", "ParameterValue": "you@example.com" },
+  { "ParameterKey": "AgentRuntimeArn", "ParameterValue": "" },
+  { "ParameterKey": "ReportBucketName", "ParameterValue": "" }
+]

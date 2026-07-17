@@ -1,0 +1,187 @@
+# Event filtering and categorization rules (plan sections 12 and 13).
+#
+# Filtering is deterministic and runs BEFORE Nova receives any data. The goal is
+# to keep meaningful management activity and drop read-only noise.
+
+version: 1
+
+# --------------------------------------------------------------------------
+# Inclusion / exclusion
+# --------------------------------------------------------------------------
+
+# Read-only operations that succeeded are dropped unless another include rule
+# matches. Prefixes are matched case-sensitively against eventName.
+readonly_prefixes:
+  - Describe
+  - Get
+  - List
+  - Lookup
+  - Search
+  - Head
+  - Batch Get
+  - View
+  - Estimate
+
+# Event names that must ALWAYS be included even when read-only heuristics would
+# otherwise drop them (rarely needed; kept for completeness).
+force_include_event_names: []
+
+# Event sources whose successful, read-only polling is pure noise.
+noise_event_sources:
+  - health.amazonaws.com
+  - support.amazonaws.com
+  - trustedadvisor.amazonaws.com
+  - notifications.amazonaws.com
+
+# High-frequency, non-mutating event names that are dropped when successful,
+# even if their source belongs to an always-include category (e.g. sts).
+noise_event_names:
+  - AssumeRole
+  - AssumeRoleWithSAML
+  - AssumeRoleWithWebIdentity
+  - GetSessionToken
+  - GetFederationToken
+  - GetCallerIdentity
+  - GetServiceBearerToken
+  - RenewRole
+
+# User agents that indicate routine internal AWS service polling. Matched only
+# for successful, read-only events so genuine service-role changes are kept.
+noise_user_agent_substrings:
+  - config.amazonaws.com
+  - cloudtrail.amazonaws.com
+  - health.amazonaws.com
+  - autoscaling.amazonaws.com
+
+# --------------------------------------------------------------------------
+# Category classification
+# --------------------------------------------------------------------------
+# Categories are evaluated in the order listed here (`category_order`). The
+# first match wins. Specific, source-driven categories are checked before the
+# broad RESOURCE_LIFECYCLE prefix category so that, e.g., CreateRole classifies
+# as IAM_POLICY rather than RESOURCE_LIFECYCLE.
+#
+# A category matches when ANY of these hold:
+#   - event_source is in `sources` AND (no name filters, or a name filter hits)
+#   - eventName contains any string in `event_name_contains`
+#   - eventName starts with any string in `event_name_prefixes`
+
+# Order matters. NETWORK is checked before IAM_POLICY so that event names like
+# "AuthorizeSecurityGroupIngress" (which contain the IAM token "Group") are
+# classified as NETWORK. SECURITY is checked before IAM_POLICY so that
+# "PutKeyPolicy" (which contains "Policy") stays SECURITY.
+category_order:
+  - DEPLOYMENT
+  - NETWORK
+  - SECURITY
+  - IAM_POLICY
+  - RESOURCE_LIFECYCLE
+
+categories:
+  DEPLOYMENT:
+    sources:
+      - cloudformation.amazonaws.com
+      - codedeploy.amazonaws.com
+      - codepipeline.amazonaws.com
+      - codebuild.amazonaws.com
+    event_name_contains:
+      - Stack
+      - ChangeSet
+      - Deploy
+      - Pipeline
+
+  IAM_POLICY:
+    sources:
+      - iam.amazonaws.com
+      - organizations.amazonaws.com
+      - access-analyzer.amazonaws.com
+    event_name_contains:
+      - Policy
+      - Role
+      - User
+      - Group
+      - AccessKey
+      - LoginProfile
+      - MFADevice
+      - PermissionsBoundary
+
+  SECURITY:
+    sources:
+      - kms.amazonaws.com
+      - guardduty.amazonaws.com
+      - securityhub.amazonaws.com
+      - macie2.amazonaws.com
+      - wafv2.amazonaws.com
+    event_name_contains:
+      - Trail
+      - Logging
+      - PublicAccessBlock
+      - BucketPolicy
+      - Encryption
+      - KeyPolicy
+      - DisableKey
+      - ScheduleKeyDeletion
+
+  NETWORK:
+    # Matched primarily by name so RunInstances/StartInstances stay in
+    # RESOURCE_LIFECYCLE rather than NETWORK.
+    event_name_contains:
+      - SecurityGroup
+      - NetworkAcl
+      - Route
+      - Subnet
+      - Vpc
+      - Peering
+      - InternetGateway
+      - NatGateway
+      - Ingress
+      - Egress
+      - NetworkInterface
+
+  RESOURCE_LIFECYCLE:
+    event_name_prefixes:
+      - Create
+      - Delete
+      - Terminate
+      - Run
+      - Start
+      - Stop
+      - Reboot
+      - Register
+      - Deregister
+      - Put
+      - Modify
+      - Update
+      - Attach
+      - Detach
+      - Associate
+      - Disassociate
+      - Tag
+      - Untag
+
+# Categories that are always included regardless of read-only heuristics.
+always_include_categories:
+  - DEPLOYMENT
+  - IAM_POLICY
+  - NETWORK
+  - SECURITY
+
+# --------------------------------------------------------------------------
+# Episode grouping (plan section 13)
+# --------------------------------------------------------------------------
+# Ordered list of keys used to correlate events into one episode. Earlier keys
+# take precedence when present.
+# NOTE: request_id is intentionally NOT used for correlation. Almost every
+# CloudTrail event carries a unique requestID, so grouping on it produces one
+# singleton episode per event. Instead we correlate by stack, resource, then
+# the actor's session within a time window, then a coarse source+time bucket.
+grouping_priority:
+  - cloudformation_stack_id
+  - codepipeline_execution_id
+  - resource_arn
+  - principal_session
+  - source_time_window
+
+# Time window (seconds) used by the resource, session, and source strategies to
+# group a burst of related activity into one operational episode.
+time_window_seconds: 900

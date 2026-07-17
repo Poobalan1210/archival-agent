@@ -1,0 +1,3 @@
+# Dispatcher Lambda dependencies.
+# boto3/botocore are provided by the AWS Lambda Python 3.12 runtime, so nothing
+# needs to be bundled. Pin here only if you package your own boto3 version.
