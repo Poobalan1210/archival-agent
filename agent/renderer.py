@@ -14,6 +14,7 @@ from typing import Any
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 from agent.config import Config, TEMPLATES_DIR
+from agent.filters import FilterStats
 from agent.models.episode import Episode
 from agent.models.event import NormalizedEvent
 from agent.models.report import ArchivalReport
@@ -53,12 +54,19 @@ def categorize_events(events: list[NormalizedEvent]) -> dict[str, list[Normalize
     return sections
 
 
-def _totals(episodes: list[Episode], events: list[NormalizedEvent]) -> dict:
+def _totals(
+    episodes: list[Episode],
+    events: list[NormalizedEvent],
+    events_collected: int = 0,
+) -> dict:
     by_category: dict[str, int] = {}
     for episode in episodes:
         key = str(episode.category)
         by_category[key] = by_category.get(key, 0) + 1
     return {
+        # Raw CloudTrail count before filtering. Persisted so the history view
+        # can show signal vs noise without re-reading events.json.
+        "eventsCollected": events_collected,
         "eventsIncluded": len(events),
         "failedEvents": sum(1 for e in events if e.is_failure()),
         "episodeCount": len(episodes),
@@ -75,6 +83,8 @@ def build_render_context(
     agent_execution: dict[str, Any],
     config: Config,
     presigned_url: str | None = None,
+    events_collected: int = 0,
+    filter_stats: FilterStats | None = None,
 ) -> dict[str, Any]:
     """Assemble everything the templates need."""
     sections = categorize_events(events)
@@ -100,7 +110,8 @@ def build_render_context(
             ],
             "partial": bool(coverage.failed_regions),
         },
-        "totals": _totals(episodes, events),
+        "totals": _totals(episodes, events, events_collected),
+        "filter_stats": filter_stats.as_dict() if filter_stats is not None else None,
         "report": report,
         "episodes": episodes,
         "sections": sections,
@@ -127,6 +138,7 @@ def build_report_json(context: dict[str, Any]) -> dict:
         "meta": context["meta"],
         "collection": context["coverage"],
         "totals": context["totals"],
+        "filterStats": context.get("filter_stats"),
         "agentExecution": context["agent_execution"],
         "report": report.model_dump(by_alias=True, mode="json"),
         "episodes": [ep.model_dump(by_alias=True, mode="json") for ep in episodes],

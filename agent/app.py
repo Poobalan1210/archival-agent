@@ -197,7 +197,15 @@ def run_archival(
 
         # -- Render / store -----------------------------------------------
         render_ctx = build_render_context(
-            context, coverage, outcome.report, episodes, included, agent_execution, config
+            context,
+            coverage,
+            outcome.report,
+            episodes,
+            included,
+            agent_execution,
+            config,
+            events_collected=len(raw_events),
+            filter_stats=filter_stats,
         )
         report_json = build_report_json(render_ctx)
         report_html = render_report_html(render_ctx)

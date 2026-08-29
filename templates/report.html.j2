@@ -54,6 +54,7 @@
   .card { background:#fff; border:1px solid var(--line); border-radius: 10px; padding: 14px; }
   .card .n { font-size: 26px; font-weight: 700; }
   .card .l { font-size: 12px; color: var(--muted); }
+  .muted { color: var(--muted); font-size: 13px; }
 
   /* Scroll container for long tables; keeps the header visible while scrolling. */
   .table-scroll { max-height: 420px; overflow: auto; border: 1px solid var(--line); border-radius: 8px; background:#fff; }
@@ -120,6 +121,16 @@
     <div class="card"><div class="n">{{ n }}</div><div class="l">{{ cat }}</div></div>
     {% endfor %}
   </div>
+  {% if filter_stats %}
+  <p class="muted">
+    Collected {{ filter_stats.collected }} management events, kept
+    {{ filter_stats.included }}. Dropped
+    {{ filter_stats.dropped.readOnly }} read-only,
+    {{ filter_stats.dropped.noise }} known-noisy,
+    {{ filter_stats.dropped.selfNoise }} self-generated, and
+    {{ filter_stats.dropped.duplicate }} duplicate events before analysis.
+  </p>
+  {% endif %}
 
   {# 3. AI executive summary #}
   <h2>3. Executive summary</h2>

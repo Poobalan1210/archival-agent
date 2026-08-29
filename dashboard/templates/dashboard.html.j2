@@ -1,0 +1,176 @@
+{#- Archival Agent console. Self-contained: inline CSS, inline SVG, no scripts. -#}
+{% macro badge(text, kind) -%}
+<span class="badge badge-{{ kind }}">{{ text }}</span>
+{%- endmacro %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Archival Agent — run history</title>
+<style>
+  :root { --fg:#1a2330; --muted:#5b6b7f; --line:#e2e8f0; --bg:#f7f9fc; --accent:#1f6feb; }
+  * { box-sizing: border-box; }
+  body { font-family: -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; color: var(--fg); background: var(--bg); margin: 0; line-height: 1.5; }
+  .wrap { max-width: 1000px; margin: 0 auto; padding: 24px; }
+  header.top { background: linear-gradient(135deg,#0b2545,#1f6feb); color:#fff; padding: 28px 24px; border-radius: 12px; }
+  header.top h1 { margin: 0 0 6px; font-size: 24px; }
+  header.top .sub { opacity: .9; font-size: 14px; }
+  h2 { font-size: 18px; margin-top: 34px; padding-bottom: 6px; border-bottom: 2px solid var(--line); }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit,minmax(150px,1fr)); gap: 12px; margin-top: 16px; }
+  .card { background:#fff; border:1px solid var(--line); border-radius: 10px; padding: 14px; }
+  .card .n { font-size: 26px; font-weight: 700; }
+  .card .l { font-size: 12px; color: var(--muted); }
+  .panel { background:#fff; border:1px solid var(--line); border-radius: 10px; padding: 12px; margin-top: 14px; }
+  .muted { color: var(--muted); font-size: 13px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; background:#fff; }
+  .table-scroll { max-height: 520px; overflow: auto; border: 1px solid var(--line); border-radius: 8px; background:#fff; margin-top: 14px; }
+  th, td { padding: 8px 10px; text-align: left; border-bottom: 1px solid var(--line); }
+  thead th { position: sticky; top: 0; background:#f2f5f9; z-index: 1; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+  tbody tr:hover { background:#fbfcfe; }
+  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .small { font-size: 11px; }
+  .num { text-align: right; font-variant-numeric: tabular-nums; }
+  .badge { display:inline-block; padding: 1px 7px; border-radius: 999px; font-size: 11px; font-weight: 600; }
+  .badge-high { background:#fee4e2; color:#b42318; }
+  .badge-med { background:#fef0c7; color:#b54708; }
+  .badge-low { background:#dcfae6; color:#067647; }
+  a { color: var(--accent); }
+  .empty { padding: 28px; text-align: center; color: var(--muted); }
+  footer { margin: 32px 0 8px; color: var(--muted); font-size: 12px; }
+  .notice { margin-top: 14px; padding: 12px 14px; background:#fffbeb; border:1px solid #fde68a; border-left: 4px solid #d97706; border-radius: 8px; font-size: 13px; color:#78350f; }
+  .notice strong { display:block; margin-bottom: 2px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="top">
+    <h1>Archival Agent — run history{{ ' (demo)' if demo else '' }}</h1>
+    <div class="sub">
+      {% if has_history %}
+      {{ summary.days }} day{{ '' if summary.days == 1 else 's' }} of audited activity.
+      Busiest day {{ summary.busiestDate }}.
+      {% else %}
+      No reports stored yet.
+      {% endif %}
+    </div>
+  </header>
+
+  {% if demo %}
+  <div class="notice">
+    <strong>Anonymized demo view</strong>
+    {{ demo_notice }}
+  </div>
+  {% endif %}
+
+  {% if not has_history %}
+  <div class="panel empty">
+    <p>Nothing to show yet. Once a daily run completes, its report lands in S3 and
+    appears here.</p>
+    <p class="muted">To backfill earlier days, invoke the dispatcher with
+    <span class="mono">windowDaysAgo</span> set and <span class="mono">force: true</span>.</p>
+  </div>
+  {% else %}
+
+  <h2>Across the window</h2>
+  <div class="grid">
+    <div class="card"><div class="n">{{ summary.eventsIncluded }}</div><div class="l">Events analyzed</div></div>
+    <div class="card"><div class="n">{{ summary.episodes }}</div><div class="l">Episodes correlated</div></div>
+    <div class="card"><div class="n">{{ summary.failedEvents }}</div><div class="l">Failed events</div></div>
+    <div class="card"><div class="n">{{ summary.recommendations }}</div><div class="l">Recommendations</div></div>
+    <div class="card"><div class="n">{{ summary.aiSuccessRate }}%</div><div class="l">AI success rate</div></div>
+    <div class="card"><div class="n">{{ summary.fallbackDays }}</div><div class="l">Fallback days</div></div>
+  </div>
+
+  <h2>Signal vs noise</h2>
+  <div class="panel">
+    {{ signal_chart | safe }}
+    <p class="muted">
+      Deterministic filtering discarded {{ summary.noiseFilteredPct }}% of the
+      {{ summary.eventsCollected }} management events collected, before the model
+      saw anything. Read-only calls, known-noisy sources, the agent's own
+      activity, and duplicate mutations are all dropped in plain code.
+    </p>
+  </div>
+
+  <h2>Daily activity</h2>
+  <div class="panel">
+    {{ volume_chart | safe }}
+  </div>
+
+  <h2>Episodes by category</h2>
+  <div class="panel">
+    {{ category_chart | safe }}
+  </div>
+
+  <h2>Runs</h2>
+  <div class="table-scroll">
+    <table>
+      <thead>
+        <tr>
+          <th>Date</th>
+          <th>Run</th>
+          <th>AI</th>
+          <th class="num">Collected</th>
+          <th class="num">Kept</th>
+          <th class="num">Failures</th>
+          <th class="num">Episodes</th>
+          <th class="num">Recs</th>
+          <th>Summary</th>
+          {% if not demo %}<th>Report</th>{% endif %}
+        </tr>
+      </thead>
+      <tbody>
+      {% for r in records %}
+        <tr>
+          <td class="mono">{{ r.date }}</td>
+          <td>
+            {{ badge(r.status, r | status_kind) }}
+            {% if r.partial %}{{ badge('PARTIAL COVERAGE', 'med') }}{% endif %}
+          </td>
+          <td>
+            {{ badge(r.ai_status, r | ai_kind) }}
+            {% if r.fallback_used %}{{ badge('FALLBACK', 'med') }}{% endif %}
+          </td>
+          <td class="num">{{ r.events_collected }}</td>
+          <td class="num">{{ r.events_included }}</td>
+          <td class="num">{{ r.failed_events or '—' }}</td>
+          <td class="num">{{ r.episode_count }}</td>
+          <td class="num">{{ r.recommendation_count }}</td>
+          <td class="small">{{ r.headline or '—' }}</td>
+          {% if not demo %}
+          <td><a href="/report/{{ r.date }}{{ token_query }}">open</a></td>
+          {% endif %}
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% if demo %}
+  <p class="muted">
+    Per-day report drill-through is disabled in this view. The stored reports
+    contain full CloudTrail detail and are never served publicly.
+    {% if sample_report %}
+    To see what a full report looks like, open the
+    <a href="{{ sample_report }}" rel="noopener noreferrer" target="_blank">sample report</a>,
+    generated from the project's demo scenarios against a placeholder account.
+    {% endif %}
+  </p>
+  {% else %}
+  <p class="muted">
+    Report links redirect to a presigned S3 URL that expires in 15 minutes. The
+    bucket stays private; nothing is served publicly.
+  </p>
+  {% endif %}
+
+  {% endif %}
+
+  <footer>
+    Read-only view over reports in the private S3 bucket. This console cannot
+    modify AWS and cannot trigger a run.
+  </footer>
+
+</div>
+</body>
+</html>

@@ -1,10 +1,10 @@
 # Archival Agent
 
-A personal, always-on AWS operations analyst. Once a day it reviews the previous day's AWS activity, removes the noise, groups related events into operational "episodes", uses an AI agent to investigate the significant ones, validates every claim against the source events, stores a detailed report in S3, and emails you a summary.
+A personal, always-on AWS operations analyst. Once a day it reviews the previous day's AWS activity, removes the noise, groups related events into operational "episodes", uses an AI agent to investigate the significant ones, validates every claim against the source events, stores a detailed report in S3, and emails you a summary. A read-only web console charts the history so you can see trends instead of isolated days.
 
 It is **read-only**. It inspects CloudTrail, explains what happened, and recommends follow-ups. It never changes anything in your account.
 
-Built for the AWS Builder Center *Weekend Agent Challenge* with the [Strands Agents SDK](https://strandsagents.com/), Amazon Nova Pro, and Amazon Bedrock AgentCore Runtime.
+Built for the AWS Builder Center *Weekend Agent Challenge*, then extended for the *Weekend Showcase Challenge*, with the [Strands Agents SDK](https://strandsagents.com/), Amazon Nova Pro, and Amazon Bedrock AgentCore Runtime.
 
 ---
 
@@ -22,6 +22,8 @@ Every day, on a schedule, and with no button to press:
 8. Emails a summary via SES with the headline, totals, failures, and top recommendations.
 9. Emits traces, model calls, and tool calls to CloudWatch through AgentCore Observability.
 
+Between runs, the **history console** reads the stored reports and charts activity, failures, episode categories, agent health, and how much noise the deterministic filters removed. See [History console](#history-console).
+
 ## Architecture
 
 ```mermaid
@@ -36,9 +38,13 @@ flowchart TD
     J --> K[(Private S3 bucket)]
     J --> L[SES email summary]
     C -. traces .-> M[CloudWatch / AgentCore Observability]
+    K -->|read-only| N[Dashboard Lambda<br/>Function URL]
+    N --> O[History console<br/>server-rendered SVG]
 ```
 
 The trigger is EventBridge Scheduler. It invokes a small dispatcher Lambda, which calls `InvokeAgentRuntime`. The runtime runs the whole pipeline and returns a compact status.
+
+The console is a separate Lambda behind a Function URL. It only reads the report bucket, so it cannot affect a run.
 
 ## AWS services
 
@@ -48,7 +54,8 @@ The trigger is EventBridge Scheduler. It invokes a small dispatcher Lambda, whic
 | Amazon Bedrock (Nova Pro) | Foundation model |
 | Strands Agents SDK | Agent framework and read-only tools |
 | Amazon EventBridge Scheduler | Daily trigger |
-| AWS Lambda | Dispatcher that invokes the runtime |
+| AWS Lambda | Dispatcher that invokes the runtime, plus the read-only history console |
+| AWS Lambda Function URL | Console endpoint (token-gated) |
 | AWS CloudTrail | Activity source (`LookupEvents`) |
 | Amazon S3 | Private report storage |
 | Amazon SES | Email summary |
@@ -75,6 +82,12 @@ archival-agent/
 │   ├── models/             # Pydantic models
 │   └── tools/              # Read-only Strands tools
 ├── dispatcher/             # Dispatcher Lambda (handler.py)
+├── dashboard/              # History console Lambda (read-only)
+│   ├── handler.py          # Routing + token auth
+│   ├── history.py          # Reads/aggregates stored reports from S3
+│   ├── charts.py           # Server-rendered inline SVG (no JS, no CDN)
+│   ├── render.py           # Jinja2 environment
+│   └── templates/          # Console template
 ├── infrastructure/         # AWS SAM template + example parameters
 ├── deploy/                 # Runtime image build + registration scripts
 ├── rules/                  # Deterministic rules (filtering, redaction, etc.)
@@ -153,6 +166,19 @@ aws lambda invoke --function-name archival-agent-dispatcher \
 sam deploy --parameter-overrides ScheduleState=ENABLED ...
 ```
 
+**6. Set a console token** so the history dashboard will serve data. Add
+`DashboardToken=<random string>` to `parameter_overrides` in `samconfig.toml` and
+run `sam deploy`. Until it is set, the console returns 503. See
+[History console](#history-console).
+
+> Prefer editing `samconfig.toml` over passing `--parameter-overrides` on the CLI.
+> Parameters you omit fall back to template defaults, which would silently reset
+> `ScheduleState` to `DISABLED` and re-widen the dispatcher's IAM policy.
+
+Changes under `agent/`, `prompts/`, `rules/`, or `templates/` live in the
+container image, so they need `./deploy/deploy_runtime.sh` again. `sam deploy`
+alone only updates the dispatcher, the console, and the infrastructure.
+
 ## Configuration
 
 Runtime environment variables (set on the AgentCore runtime):
@@ -178,6 +204,132 @@ Invocation payload fields:
 | `windowDaysAgo` | `1` | `1` = previous day, `0` = today so far, `N` = N days ago |
 | `includeGlobalRegion` | `true` | Add `us-east-1` automatically; `false` scopes to the listed regions |
 
+Dashboard Lambda environment variables (set by the SAM template):
+
+| Variable | Purpose |
+|---|---|
+| `DASHBOARD_TOKEN` | Shared access token. **Empty means the console serves 503 and no data.** |
+| `REPORT_BUCKET` | Bucket to read reports from |
+| `AWS_ACCOUNT_ID` | Account prefix in the S3 key layout |
+| `AGENT_REGION` | Region for the S3 client |
+| `DEMO_MODE` | `true` serves the public anonymized view (no token, no drill-through) |
+| `DEMO_SCRUB` | Comma-separated name fragments to redact in demo mode |
+
+## History console
+
+A daily email tells you about one day. The console reads every stored report and
+shows the shape of the account over time: events analyzed, failures, episodes by
+category, recommendation volume, whether the model succeeded or fell back, and
+how much noise the deterministic filters removed before the model saw anything.
+
+It reuses data the agent already writes. Each run stores `report.json` under
+`account=<id>/date=<YYYY-MM-DD>/run=<runId>/`, and each date gets a small
+`completed.json` marker naming the run that won that date. The console reads the
+markers first, then the reports they point at, falling back to the newest
+`run=*/report.json` for dates where a run failed before writing a marker.
+
+Get the URL from the stack outputs:
+
+```bash
+aws cloudformation describe-stacks --stack-name archival-agent \
+  --query "Stacks[0].Outputs[?OutputKey=='DashboardUrl'].OutputValue" --output text
+```
+
+| Route | Purpose |
+|---|---|
+| `GET /` | History dashboard |
+| `GET /api/history.json` | The same aggregates as JSON |
+| `GET /report/<YYYY-MM-DD>` | 302 to a 15-minute presigned link to that day's HTML report |
+| `GET /healthz` | Liveness probe (the only unauthenticated route) |
+
+Add `?days=N` to change the window (default 60, max 365).
+
+### Access control
+
+The console serves CloudTrail-derived detail: IAM principals, resource names,
+security-group changes. It therefore requires a shared token, supplied as
+`?token=<value>` or an `Authorization: Bearer <value>` header and compared with
+`hmac.compare_digest`.
+
+Set it in `samconfig.toml` and redeploy:
+
+```toml
+parameter_overrides = [
+    # ...
+    "DashboardToken=<a long random string>",
+]
+```
+
+Generate one with `openssl rand -hex 32`. **If `DashboardToken` is empty the
+console returns 503 and serves nothing.** That is deliberate: the Function URL
+uses `AuthType: NONE` so the link is shareable, which means the handler must not
+fall open. For a stricter posture, change `FunctionUrlConfig.AuthType` to
+`AWS_IAM` in the template and sign requests with SigV4.
+
+The console's IAM role grants only `s3:ListBucket` and `s3:GetObject` on
+`account=*`. It cannot write, delete, or trigger a run. The page is
+self-contained inline SVG and CSS with no scripts and no CDN, so the report
+bucket needs no CORS grant and stays private.
+
+### Public demo console
+
+Reports name IAM principals and resource names, which describe a live account's
+inventory and where it is failing. Sharing the real console publicly is not
+advisable. For a shareable link, enable a second, anonymized console:
+
+```toml
+parameter_overrides = [
+    # ...
+    "EnableDemoConsole=true",
+    "DemoScrubFragments=yourprefix,anotherprefix",
+]
+```
+
+It runs the same code with `DEMO_MODE=true` set in its environment, so it cannot
+be made to serve real identifiers by crafting a request. What it does:
+
+| | Real console | Demo console |
+|---|---|---|
+| Access | Token required, fails closed | Public, no token |
+| Volumes, failures, categories, AI health | Real | **Real** |
+| Account ID, principal names, resource names | Shown | Withheld |
+| Run IDs, failed region names | Real | Pseudonymized (`demo-run-001`, `region-1`) |
+| Report headlines | Model's text | Derived from counts only |
+| `/report/<date>` drill-through | Presigned redirect | Disabled (404) |
+
+Every number stays real; every free-text field is *replaced* rather than
+filtered, so there is no pattern-matching gap to leak through. The demo role is
+additionally scoped to `report.json` and `completed.json` only, so it cannot read
+the rendered HTML reports at all. `DemoScrubFragments` is defense in depth for
+anything that does reach output.
+
+Get the public URL with:
+
+```bash
+aws cloudformation describe-stacks --stack-name archival-agent --region us-east-1 \
+  --query "Stacks[0].Outputs[?OutputKey=='DemoDashboardUrl'].OutputValue" --output text
+```
+
+Remove it after sharing by setting `EnableDemoConsole=false` and redeploying.
+
+### Backfilling history
+
+A trends view needs more than one point. `windowDaysAgo` lets you replay earlier
+days; CloudTrail's `LookupEvents` retains 90 days, so recent history is
+available:
+
+```bash
+for d in 2 3 4 5 6 7; do
+  aws lambda invoke --function-name archival-agent-dispatcher \
+    --payload "{\"jobType\":\"DAILY_ARCHIVAL\",\"timezone\":\"Asia/Kolkata\",\"auditRegions\":[\"ap-south-1\"],\"force\":true,\"windowDaysAgo\":$d}" \
+    --cli-binary-format raw-in-base64-out --cli-read-timeout 0 "backfill-$d.json"
+done
+```
+
+`force: true` is required because each date already has (or will get) a
+completion marker. Runs are sequential by design; each one invokes the model, so
+expect a couple of minutes per day.
+
 ## Demo
 
 `demo/scenario_runner.py` performs safe, prefixed, tagged AWS operations (an SQS queue, a successful and a failing CloudFormation stack, a security-group change, and a deliberate duplicate-rule failure) so a run has real activity to analyze. Clean up afterward with `demo/cleanup.py`.
@@ -194,7 +346,8 @@ Every demo resource is prefixed `archival-agent-demo-` and tagged `archival-agen
 - The agent is read-only and cannot modify AWS.
 - Secrets, tokens, environment values, and request bodies are redacted during normalization; request parameters are allowlisted.
 - Reports are stored in a private, encrypted, TLS-only S3 bucket. Links are presigned and expire.
-- Event content is treated as untrusted data and is never interpreted as instructions.
+- Event content is treated as untrusted data and is never interpreted as instructions. Both renderers use Jinja2 autoescaping, and the console escapes every value it interpolates into SVG.
+- The console requires a shared token, fails closed when none is configured, and holds read-only S3 permissions. It cannot modify a report or start a run.
 
 ## License
 

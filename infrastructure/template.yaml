@@ -50,10 +50,43 @@ Parameters:
     Type: String
     Default: ""
     Description: Optional explicit bucket name. Defaults to archival-agent-<accountId>.
+  DashboardToken:
+    Type: String
+    Default: ""
+    NoEcho: true
+    Description: >
+      Shared access token for the history console. Reports contain
+      CloudTrail-derived detail, so the console refuses to serve data (503)
+      until this is set. Pass it as ?token=<value> or a Bearer header.
+  EnableDemoConsole:
+    Type: String
+    Default: "false"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: >
+      Create a SECOND, PUBLIC console that serves anonymized aggregates only
+      (no account ID, no principal or resource names, no report drill-through).
+      Intended for sharing a live link. Off by default.
+  DemoScrubFragments:
+    Type: String
+    Default: ""
+    Description: >
+      Optional comma-separated name fragments to redact from any text the demo
+      console emits (e.g. "awsug,myapp"). Defense in depth; the demo view already
+      replaces free-text fields with values derived from counts.
+  DemoSampleReportUrl:
+    Type: String
+    Default: ""
+    Description: >
+      Optional https URL of a pre-sanitized sample report to link from the demo
+      console, so visitors can see a full report without exposing a real one.
+      Must be sanitized before publishing; it is served to anyone.
 
 Conditions:
   HasRuntimeArn: !Not [!Equals [!Ref AgentRuntimeArn, ""]]
   HasBucketName: !Not [!Equals [!Ref ReportBucketName, ""]]
+  DemoEnabled: !Equals [!Ref EnableDemoConsole, "true"]
 
 Globals:
   Function:
@@ -278,6 +311,154 @@ Resources:
         LogGroup: !Ref DispatcherLogGroup
 
   # ---------------------------------------------------------------------------
+  # History console: read-only view over the stored reports.
+  # Serves aggregates from report.json and redirects to presigned report HTML.
+  # ---------------------------------------------------------------------------
+  DashboardLogGroup:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Delete
+    Properties:
+      LogGroupName: /aws/lambda/archival-agent-dashboard
+      RetentionInDays: 30
+
+  DashboardRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "archival-agent-dashboard-${AWS::Region}"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        # Strictly read-only: no PutObject, no DeleteObject. The console can
+        # never alter a stored report.
+        - PolicyName: s3-reports-read
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: s3:ListBucket
+                Resource: !GetAtt ReportBucket.Arn
+                Condition:
+                  StringLike:
+                    s3:prefix: "account=*"
+              - Effect: Allow
+                Action: s3:GetObject
+                Resource: !Sub "${ReportBucket.Arn}/account=*"
+        - PolicyName: logs
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !GetAtt DashboardLogGroup.Arn
+
+  DashboardFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: archival-agent-dashboard
+      CodeUri: ../dashboard/
+      Handler: handler.handler
+      # Aggregating a 60-day window is a few dozen small GetObject calls.
+      Timeout: 30
+      MemorySize: 512
+      Role: !GetAtt DashboardRole.Arn
+      Environment:
+        Variables:
+          AWS_ACCOUNT_ID: !Ref AWS::AccountId
+          AGENT_REGION: !Ref AWS::Region
+          REPORT_BUCKET: !Ref ReportBucket
+          DASHBOARD_TOKEN: !Ref DashboardToken
+      # AuthType NONE keeps the console shareable; the handler enforces a
+      # shared token itself and fails closed when DashboardToken is empty.
+      FunctionUrlConfig:
+        AuthType: NONE
+      LoggingConfig:
+        LogGroup: !Ref DashboardLogGroup
+
+  # ---------------------------------------------------------------------------
+  # Public demo console (optional). Same code, DEMO_MODE baked into the
+  # environment so this endpoint cannot be made to serve real identifiers.
+  # Deliberately has no DASHBOARD_TOKEN.
+  # ---------------------------------------------------------------------------
+  DemoDashboardLogGroup:
+    Type: AWS::Logs::LogGroup
+    Condition: DemoEnabled
+    DeletionPolicy: Delete
+    Properties:
+      LogGroupName: /aws/lambda/archival-agent-dashboard-demo
+      RetentionInDays: 30
+
+  DemoDashboardRole:
+    Type: AWS::IAM::Role
+    Condition: DemoEnabled
+    Properties:
+      RoleName: !Sub "archival-agent-dashboard-demo-${AWS::Region}"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        # Read-only, and no s3:GetObject on report.html is needed because the
+        # demo console never presigns or serves stored reports. Scoped to
+        # report.json / completed.json only.
+        - PolicyName: s3-reports-read
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: s3:ListBucket
+                Resource: !GetAtt ReportBucket.Arn
+                Condition:
+                  StringLike:
+                    s3:prefix: "account=*"
+              - Effect: Allow
+                Action: s3:GetObject
+                Resource:
+                  - !Sub "${ReportBucket.Arn}/account=*/report.json"
+                  - !Sub "${ReportBucket.Arn}/account=*/completed.json"
+        - PolicyName: logs
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !GetAtt DemoDashboardLogGroup.Arn
+
+  DemoDashboardFunction:
+    Type: AWS::Serverless::Function
+    Condition: DemoEnabled
+    Properties:
+      FunctionName: archival-agent-dashboard-demo
+      CodeUri: ../dashboard/
+      Handler: handler.handler
+      Timeout: 30
+      MemorySize: 512
+      Role: !GetAtt DemoDashboardRole.Arn
+      Environment:
+        Variables:
+          AWS_ACCOUNT_ID: !Ref AWS::AccountId
+          AGENT_REGION: !Ref AWS::Region
+          REPORT_BUCKET: !Ref ReportBucket
+          DEMO_MODE: "true"
+          DEMO_SCRUB: !Ref DemoScrubFragments
+          DEMO_SAMPLE_REPORT_URL: !Ref DemoSampleReportUrl
+      FunctionUrlConfig:
+        AuthType: NONE
+      LoggingConfig:
+        LogGroup: !Ref DemoDashboardLogGroup
+
+  # ---------------------------------------------------------------------------
   # EventBridge Scheduler (plan section 6) - DISABLED until Phase 6
   # ---------------------------------------------------------------------------
   SchedulerRole:
@@ -339,3 +520,15 @@ Outputs:
   NovaModelIdOut:
     Description: Model ID configured for the analyst.
     Value: !Ref NovaModelId
+  DashboardUrl:
+    Description: >
+      History console. Append ?token=<DashboardToken> to authenticate.
+      Returns 503 until DashboardToken is set.
+    Value: !GetAtt DashboardFunctionUrl.FunctionUrl
+  DemoDashboardUrl:
+    Condition: DemoEnabled
+    Description: >
+      PUBLIC anonymized console. No token. Safe to share: serves aggregate
+      numbers only, with no account ID, principal names, resource names, or
+      report drill-through.
+    Value: !GetAtt DemoDashboardFunctionUrl.FunctionUrl

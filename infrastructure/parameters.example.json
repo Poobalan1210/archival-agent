@@ -6,5 +6,6 @@
   { "ParameterKey": "SesSenderEmail", "ParameterValue": "archival-agent@example.com" },
   { "ParameterKey": "SesRecipientEmail", "ParameterValue": "you@example.com" },
   { "ParameterKey": "AgentRuntimeArn", "ParameterValue": "" },
-  { "ParameterKey": "ReportBucketName", "ParameterValue": "" }
+  { "ParameterKey": "ReportBucketName", "ParameterValue": "" },
+  { "ParameterKey": "DashboardToken", "ParameterValue": "replace-with-openssl-rand-hex-32" }
 ]

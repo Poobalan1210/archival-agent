@@ -31,6 +31,25 @@ class FilterStats:
     kept_mutating: int = 0
     by_category: dict[str, int] = field(default_factory=dict)
 
+    def as_dict(self) -> dict:
+        """Serializable summary for the stored report (signal vs noise).
+
+        Mirrors the ``filterDropped`` shape shown to the analyst so the report
+        and the prompt describe filtering the same way.
+        """
+        return {
+            "collected": self.total,
+            "included": self.included,
+            "keptFailure": self.kept_failure,
+            "keptMutating": self.kept_mutating,
+            "dropped": {
+                "readOnly": self.dropped_read_only,
+                "noise": self.dropped_noise_source + self.dropped_noise_name,
+                "selfNoise": self.dropped_self_noise,
+                "duplicate": self.dropped_duplicate,
+            },
+        }
+
 
 # ---------------------------------------------------------------------------
 # Classification
