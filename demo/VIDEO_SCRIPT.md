@@ -26,9 +26,10 @@ It's run every day since July. This weekend I gave it one new tool, and it went 
   The model never writes the policy. Code and IAM do, and the validator rejects any diagnosis the model makes up."
 
 ## 1:20–2:15 After: same day, same model
-- Run, or show the output of, `python demo/before_after.py …`, then show the scorecard table.
+- Show the scorecard from `python demo/before_after.py --before-report demo/out/production_2026-10-25.json`:
+  root causes 0 → 3 · denied events explained 0 → 15 · fixes verified 0 → 3 · roles named 2/3 → 3/3 · gaps admitted 2 → 0.
 - Open `after.html` and scroll to **"Access denied — explained"**:
-  - 15 denied events → 3 root causes → 3 fixes verified.
+  - 15 denied events → 3 root causes (one per role) → 3 fixes verified.
   - Zoom in on one card: `implicitDeny → with the proposed statement → allowed  [FIX VERIFIED]`.
   - Show the one-statement policy.
 - Scroll to the recommendation: "Confirm whether these roles need ecr-public:GetAuthorizationToken. If they do, the minimal fix in AD-1… is verified."

@@ -34,7 +34,7 @@ from agent.config import load_config  # noqa: E402
 from agent.models.request import DailyJobRequest  # noqa: E402
 
 OUT = ROOT / "demo" / "out"
-VAGUE = re.compile(r"not (?:been )?identified|not determined|review (?:the )?iam polic", re.I)
+GAPS = re.compile(r"not (?:been )?identified|not determined", re.I)
 
 
 def run(label: str, enabled: bool, request: DailyJobRequest) -> dict:
@@ -52,18 +52,19 @@ def run(label: str, enabled: bool, request: DailyJobRequest) -> dict:
     return report
 
 
-def score(report: dict) -> dict:
+def score(report: dict, denied_roles: set[str] = frozenset()) -> dict:
     body = report["report"]
     text = json.dumps(body)
+    recs = json.dumps(body["recommendations"])
     access = report.get("accessSummary") or {}
     return {
-        "AccessDenied events": access.get("deniedEvents", "-"),
         "Root causes identified": access.get("diagnoses", 0),
         "Denied events explained": access.get("eventsExplained", 0),
         "Fixes verified by IAM simulator": access.get("verifiedFixes", 0),
         "Recommendations citing a diagnosis": sum(bool(re.search(r"\bAD-\d+", json.dumps(r)))
                                                   for r in body["recommendations"]),
-        "'not identified' / 'review IAM policies'": len(VAGUE.findall(text)),
+        "Denied roles named in recommendations": f"{sum(r in recs for r in denied_roles)}/{len(denied_roles)}",
+        "Gaps admitted ('not identified/determined')": len(GAPS.findall(text)),
         "AI status": report["agentExecution"]["aiStatus"],
         "Tools called": report["agentExecution"]["toolsCalled"],
     }
@@ -81,11 +82,13 @@ def main() -> None:
 
     request = DailyJobRequest(windowDaysAgo=args.days_ago, timezone=args.timezone,
                               auditRegions=args.regions.split(","), force=True)
-    if args.before_report:
-        before = score(json.loads(Path(args.before_report).read_text()))
-    else:
-        before = score(run("before", False, request))
-    after = score(run("after", True, request))
+    before_report = (json.loads(Path(args.before_report).read_text()) if args.before_report
+                     else run("before", False, request))
+    after_report = run("after", True, request)
+    # Same day, same events: the roles that were denied are known from the AFTER diagnoses.
+    roles = {d["principalArn"].rsplit("/", 1)[-1] for d in after_report.get("accessDiagnoses", []) if d.get("principalArn")}
+    before, after = score(before_report, roles), score(after_report, roles)
+    print(f"\nAccessDenied events that day: {(after_report.get('accessSummary') or {}).get('deniedEvents')}")
 
     print(f"\n{'':44}{'BEFORE':>10}{'AFTER':>10}")
     for k in before:
