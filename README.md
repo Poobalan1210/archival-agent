@@ -35,7 +35,7 @@ ACCESS_DIAGNOSIS_ENABLED=false   # the original agent
 REPORT_BUCKET=<demo-bucket> AWS_ACCOUNT_ID=<id> python demo/before_after.py --days-ago 1
 ```
 
-The full write-up is in [`blog/weekend-tool-challenge.md`](blog/weekend-tool-challenge.md).
+The full write-up is on AWS Builder Center (Weekend Challenge: Give your Agent a Tool).
 
 ---
 
