@@ -186,6 +186,7 @@ def run_archival(
             coverage,
             config,
             ai_failed=(analysis.ai_status == AIStatus.FAILED),
+            diagnoses=analysis.access_diagnoses,
         )
         agent_execution = _agent_execution(
             config,
@@ -206,6 +207,7 @@ def run_archival(
             config,
             events_collected=len(raw_events),
             filter_stats=filter_stats,
+            access_diagnoses=analysis.access_diagnoses,
         )
         report_json = build_report_json(render_ctx)
         report_html = render_report_html(render_ctx)

@@ -182,6 +182,23 @@ Resources:
               - Effect: Allow
                 Action: cloudtrail:LookupEvents
                 Resource: "*"
+        # diagnose_access_denied: read-only policy simulation. Nothing here can
+        # change a policy; the tool only evaluates and proposes.
+        - PolicyName: access-diagnosis-read
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - iam:SimulatePrincipalPolicy
+                  - iam:GetRole
+                  - iam:GetUser
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/*"
+                  - !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:user/*"
+              - Effect: Allow
+                Action: kms:GetKeyPolicy
+                Resource: !Sub "arn:${AWS::Partition}:kms:*:${AWS::AccountId}:key/*"
         - PolicyName: bedrock-invoke
           PolicyDocument:
             Version: "2012-10-17"

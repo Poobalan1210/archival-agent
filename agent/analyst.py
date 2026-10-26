@@ -16,7 +16,7 @@ from __future__ import annotations
 import json
 import logging
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import lru_cache
 
 from agent.config import Config, PROMPTS_DIR
@@ -24,16 +24,19 @@ from agent.filters import FilterStats
 from agent.models.enums import AIStatus
 from agent.models.episode import Episode
 from agent.models.event import NormalizedEvent
+from agent.models.diagnosis import AccessDiagnosis
 from agent.models.report import ArchivalReport
 from agent.models.request import CollectionCoverage, RunContext
 from agent.tools import context as tool_context
+from agent.tools.access_diagnosis import diagnose_access_denied
 from agent.tools.episode_evidence import get_episode_evidence
 from agent.tools.event_search import search_events
 from agent.tools.previous_report import get_previous_report
 
 logger = logging.getLogger(__name__)
 
-TOOLS = [get_episode_evidence, search_events, get_previous_report]
+BASE_TOOLS = [get_episode_evidence, search_events, get_previous_report]
+TOOLS = [*BASE_TOOLS, diagnose_access_denied]
 
 
 @dataclass
@@ -42,6 +45,7 @@ class AnalysisResult:
     ai_status: AIStatus
     tools_called: int = 0
     error: str | None = None
+    access_diagnoses: list[AccessDiagnosis] = field(default_factory=list)
 
 
 @lru_cache(maxsize=1)
@@ -73,7 +77,7 @@ def build_agent(config: Config, model=None):
 
     return Agent(
         model=model or build_model(config),
-        tools=TOOLS,
+        tools=TOOLS if config.access_diagnosis_enabled else BASE_TOOLS,
         system_prompt=load_system_prompt(),
         name="archival-agent-analyst",
     )
@@ -186,7 +190,9 @@ def build_context_message(
         "</context>\n"
         f"{note}\n"
         "Investigate the shown significant episodes (failed, security/IAM/network, "
-        "or ambiguous) using get_episode_evidence and search_events. Be efficient: "
+        "or ambiguous) using get_episode_evidence and search_events. For episodes "
+        "whose failures are AccessDenied or UnauthorizedOperation, call "
+        "diagnose_access_denied if you have it. Be efficient: "
         "focus on the highest-impact episodes. Gather the evidence you need, then "
         "stop. Do not write the final report yet."
     )
@@ -198,6 +204,11 @@ _FINAL_INSTRUCTION = (
     "event IDs, keep to at most five recommendations, label all assumptions, and "
     "mark every recommendation as requiring human review."
 )
+
+
+def _diagnoses(context: tool_context.AnalysisContext) -> list[AccessDiagnosis]:
+    """Diagnoses in ID order. They are deterministic tool output, kept even on fallback."""
+    return sorted(context.access_diagnoses.values(), key=lambda d: int(d.diagnosis_id.split("-")[1]))
 
 
 def analyze_with_strands(
@@ -256,6 +267,7 @@ def analyze_with_strands(
                     report=report,
                     ai_status=AIStatus.SUCCESS,
                     tools_called=tools_called,
+                    access_diagnoses=_diagnoses(analysis_context),
                 )
             except Exception as exc:  # noqa: BLE001 - retry, then fall back
                 last_error = exc
@@ -270,6 +282,7 @@ def analyze_with_strands(
             report=None,
             ai_status=AIStatus.FAILED,
             tools_called=len(analysis_context.tool_calls),
+            access_diagnoses=_diagnoses(analysis_context),
             error=f"{type(last_error).__name__}: {last_error}" if last_error else None,
         )
     finally:

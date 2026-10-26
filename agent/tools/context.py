@@ -15,6 +15,7 @@ import logging
 from collections.abc import Callable
 from contextvars import ContextVar
 from dataclasses import dataclass, field
+from typing import Any
 
 from agent.models.episode import Episode
 from agent.models.event import NormalizedEvent
@@ -42,6 +43,8 @@ class AnalysisContext:
     max_records: int = 50
     previous_report_loader: Callable[[int], dict | None] | None = None
     tool_calls: list[ToolCall] = field(default_factory=list)
+    # diagnose_access_denied results, keyed by (principal, action, resource).
+    access_diagnoses: dict[tuple, Any] = field(default_factory=dict)
 
     @classmethod
     def build(

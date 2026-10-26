@@ -33,3 +33,4 @@ deploy/.runtime_arn
 
 # Blog drafts (not part of the source)
 blog/
+demo/out/

@@ -14,6 +14,7 @@ import re
 from dataclasses import dataclass, field
 
 from agent.config import Config
+from agent.models.diagnosis import AccessDiagnosis
 from agent.models.enums import AIStatus, Priority
 from agent.models.episode import Episode
 from agent.models.event import NormalizedEvent
@@ -52,12 +53,14 @@ def _contains_any(text: str, phrases: list[str]) -> str | None:
 #: Standalone integers only. Skips values embedded in dates, times, event IDs,
 #: ARNs and identifiers (anything adjacent to a word char, ``-`` or ``:``).
 _INT_RE = re.compile(r"(?<![\w:.-])(\d+)(?![\w:.-])")
+_DIAGNOSIS_ID_RE = re.compile(r"\bAD-(\d+)\b")
 
 
 def _verifiable_numbers(
     episodes: list[Episode],
     events: list[NormalizedEvent],
     coverage: CollectionCoverage,
+    diagnoses: list[AccessDiagnosis] = (),
 ) -> set[int]:
     """Every integer the evidence actually supports."""
     failures = sum(1 for e in events if e.is_failure())
@@ -79,6 +82,8 @@ def _verifiable_numbers(
     }
     allowed.update(by_category.values())
     allowed.update(len(episode.event_ids) for episode in episodes)
+    for diagnosis in diagnoses:
+        allowed.update({diagnosis.occurrences, len(diagnosis.episode_ids)})
     return allowed
 
 
@@ -235,6 +240,7 @@ def validate_or_fallback(
     coverage: CollectionCoverage,
     config: Config,
     ai_failed: bool = False,
+    diagnoses: list[AccessDiagnosis] = (),
 ) -> ValidationOutcome:
     """Validate the AI report, repairing minor issues or falling back.
 
@@ -263,6 +269,8 @@ def validate_or_fallback(
     valid_resources = {
         name.lower() for ev in events for name in ev.resource_names()
     }
+
+    valid_diagnosis_ids = {d.diagnosis_id for d in diagnoses}
 
     violations: list[str] = []
     critical = False
@@ -309,6 +317,15 @@ def validate_or_fallback(
             critical = True
             continue
 
+        unknown_diagnoses = sorted(
+            f"AD-{n}" for n in _DIAGNOSIS_ID_RE.findall(text) if f"AD-{n}" not in valid_diagnosis_ids
+        )
+        if unknown_diagnoses:
+            violations.append(
+                f"Dropped recommendation '{rec.title}' citing unknown diagnosis {unknown_diagnoses}."
+            )
+            continue
+
         rec.evidence_event_ids = [e for e in rec.evidence_event_ids if e in valid_event_ids]
         kept_resources = [
             r for r in rec.affected_resources if not valid_resources or r.lower() in valid_resources
@@ -327,7 +344,7 @@ def validate_or_fallback(
     # The model is not asked to count anything, but it sometimes does anyway.
     # Any sentence stating a number the evidence does not support is dropped
     # rather than published next to the correct deterministic total.
-    allowed_numbers = _verifiable_numbers(episodes, events, coverage)
+    allowed_numbers = _verifiable_numbers(episodes, events, coverage, diagnoses)
 
     kept_summary: list[str] = []
     for line in agent_report.executive_summary:

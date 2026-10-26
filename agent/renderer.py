@@ -15,9 +15,11 @@ from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 from agent.config import Config, TEMPLATES_DIR
 from agent.filters import FilterStats
+from agent.models.diagnosis import AccessDiagnosis
 from agent.models.episode import Episode
 from agent.models.event import NormalizedEvent
 from agent.models.report import ArchivalReport
+from agent.tools.access_diagnosis import is_access_denied
 from agent.models.request import CollectionCoverage, RunContext
 
 logger = logging.getLogger(__name__)
@@ -85,6 +87,7 @@ def build_render_context(
     presigned_url: str | None = None,
     events_collected: int = 0,
     filter_stats: FilterStats | None = None,
+    access_diagnoses: list[AccessDiagnosis] | None = None,
 ) -> dict[str, Any]:
     """Assemble everything the templates need."""
     sections = categorize_events(events)
@@ -118,6 +121,20 @@ def build_render_context(
         "timeline": timeline,
         "agent_execution": agent_execution,
         "presigned_url": presigned_url,
+        "access_diagnoses": access_diagnoses or [],
+        "access_summary": _access_summary(access_diagnoses or [], events),
+    }
+
+
+def _access_summary(diagnoses: list[AccessDiagnosis], events: list[NormalizedEvent]) -> dict:
+    """Headline numbers for the access section, computed from tool output."""
+    denied = [e for e in events if is_access_denied(e)]
+    explained = sum(d.occurrences for d in diagnoses if d.verdict != "CANNOT_DIAGNOSE")
+    return {
+        "deniedEvents": len(denied),
+        "diagnoses": len(diagnoses),
+        "eventsExplained": explained,
+        "verifiedFixes": sum(1 for d in diagnoses if d.fix_verified),
     }
 
 
@@ -142,4 +159,6 @@ def build_report_json(context: dict[str, Any]) -> dict:
         "agentExecution": context["agent_execution"],
         "report": report.model_dump(by_alias=True, mode="json"),
         "episodes": [ep.model_dump(by_alias=True, mode="json") for ep in episodes],
+        "accessSummary": context.get("access_summary"),
+        "accessDiagnoses": [d.model_dump(by_alias=True, mode="json") for d in context.get("access_diagnoses", [])],
     }

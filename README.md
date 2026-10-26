@@ -8,6 +8,37 @@ Built for the AWS Builder Center *Weekend Agent Challenge*, then extended for th
 
 ---
 
+## New: it explains *why* access was denied
+
+*Added for the AWS Builder Center Weekend Challenge: Give your Agent a Tool.*
+
+`AccessDenied` is the most common failure in this agent's reports: 2,347 denied calls in October alone. Until now, the reports could only say that a call was denied, and the limitations section admitted "the specific permissions required … are not identified."
+
+The new Strands tool, **`diagnose_access_denied`** (`agent/tools/access_diagnosis.py`), closes that gap:
+
+1. Parses the principal, action, resource and AWS's stated reason from the CloudTrail error.
+2. Asks the **IAM policy simulator** why the call was denied. For KMS, the key policy is included.
+3. Classifies the cause: `MISSING_PERMISSION`, `EXPLICIT_DENY`, `BLOCKED_BY_GUARDRAIL`, `NOW_ALLOWED`, `AWS_MANAGED_ROLE` or `CANNOT_DIAGNOSE`.
+4. For a missing permission, builds the narrowest statement and **re-runs the simulator with it**. It's only marked "fix verified" if `implicitDeny` becomes `allowed`.
+5. Merges identical denials across the day into one diagnosis (`AD-1`, `AD-2`, …).
+
+Guarantees that keep this consistent with the agent's design:
+
+- **The model doesn't write the fix.** Diagnoses are deterministic tool output, rendered as their own report section.
+- **The model can only cite diagnoses that exist.** The validator drops recommendations that cite an unknown diagnosis ID.
+- **It stays read-only.** It needs `iam:SimulatePrincipalPolicy`, `iam:GetRole`, `iam:GetUser` and `kms:GetKeyPolicy`, and never changes a policy.
+
+To compare the agent with and without the tool on the same real day:
+
+```bash
+ACCESS_DIAGNOSIS_ENABLED=false   # the original agent
+REPORT_BUCKET=<demo-bucket> AWS_ACCOUNT_ID=<id> python demo/before_after.py --days-ago 1
+```
+
+The full write-up is in [`blog/weekend-tool-challenge.md`](blog/weekend-tool-challenge.md).
+
+---
+
 ## What it does
 
 Every day, on a schedule, and with no button to press:
@@ -16,7 +47,7 @@ Every day, on a schedule, and with no button to press:
 2. Collects CloudTrail management events across your configured regions (plus `us-east-1` for global-service activity such as IAM).
 3. Normalizes the events and **redacts secrets**; drops read-only noise, routine polling, and the agent's own activity.
 4. Groups related events into **episodes** (a stack deployment or a security-group change becomes one story instead of many rows).
-5. Sends the significant episodes to a **Strands agent on Amazon Nova Pro**, which investigates them with read-only tools.
+5. Sends the significant episodes to a **Strands agent on Amazon Nova Pro**, which investigates them with read-only tools, including the IAM policy simulator for AccessDenied failures.
 6. Runs a **deterministic validator** over the AI output: every fact must point to a real event ID, destructive or invented claims are rejected, and it falls back to a plain deterministic report if the AI output does not hold up.
 7. Renders an HTML + JSON report and stores it in a private S3 bucket.
 8. Emails a summary via SES with the headline, totals, failures, and top recommendations.

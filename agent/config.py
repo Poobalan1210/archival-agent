@@ -92,6 +92,8 @@ class Config:
 
     # Behaviour flags
     dry_run: bool = False
+    # The diagnose_access_denied tool (IAM policy simulator). Off = the original agent.
+    access_diagnosis_enabled: bool = True
 
     # Loaded rule documents (populated lazily)
     _rules_cache: dict = field(default_factory=dict, compare=False, repr=False)
@@ -180,4 +182,5 @@ def load_config() -> Config:
         max_tool_records=_get_int("MAX_TOOL_RECORDS", 20),
         max_agent_episodes=_get_int("MAX_AGENT_EPISODES", 25),
         dry_run=_get_bool("DRY_RUN", False),
+        access_diagnosis_enabled=_get_bool("ACCESS_DIAGNOSIS_ENABLED", True),
     )

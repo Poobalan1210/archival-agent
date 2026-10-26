@@ -82,6 +82,19 @@
   .card-scroll { max-height: 640px; overflow-y: auto; padding-right: 4px; }
   .appendix { margin-top: 44px; padding-top: 8px; border-top: 3px solid var(--line); }
   .appendix-intro { color: var(--muted); font-size: 13px; margin: 6px 0 0; }
+  /* Access-denied diagnoses */
+  .ad { background:#fff; border:1px solid var(--line); border-radius:10px; padding:14px 16px; margin:12px 0; }
+  .ad-head { display:flex; flex-wrap:wrap; gap:8px; align-items:center; font-weight:700; }
+  .ad-id { font-family: ui-monospace, Menlo, monospace; background:#0b2545; color:#fff; border-radius:6px; padding:1px 8px; font-size:12px; }
+  .ad-call { font-family: ui-monospace, Menlo, monospace; font-size:13px; margin:8px 0 4px; word-break: break-all; }
+  .sim { display:flex; flex-wrap:wrap; align-items:center; gap:10px; margin:10px 0; font-size:13px; }
+  .sim .step { border-radius:8px; padding:6px 10px; font-weight:700; font-family: ui-monospace, Menlo, monospace; }
+  .sim .deny { background:#ffe3e3; color:#b42318; }
+  .sim .allow { background:#e3f5e8; color:#1a7f37; }
+  .sim .arrow { color: var(--muted); }
+  pre.policy { background:#0d1117; color:#e6edf3; border-radius:8px; padding:10px 12px; font-size:12px; overflow-x:auto; margin:8px 0; }
+  .badge-info { background:#e8f0fe; color:#1f4fbf; }
+  .badge-grey { background:#eef2f7; color:#5b6b7f; }
   footer { margin-top: 36px; color: var(--muted); font-size: 12px; text-align:center; }
 </style>
 </head>
@@ -137,6 +150,52 @@
   <ul>
     {% for line in report.executive_summary %}<li>{{ line }}</li>{% endfor %}
   </ul>
+
+  {# 3b. Access denied, explained (diagnose_access_denied tool; deterministic) #}
+  {% if access_summary.deniedEvents %}
+  <h2>Access denied — explained <span class="count">(IAM policy simulator)</span></h2>
+  <div class="grid">
+    <div class="card"><div class="n">{{ access_summary.deniedEvents }}</div><div class="l">AccessDenied events</div></div>
+    <div class="card"><div class="n">{{ access_summary.diagnoses }}</div><div class="l">Distinct root causes</div></div>
+    <div class="card"><div class="n">{{ access_summary.eventsExplained }}</div><div class="l">Events explained</div></div>
+    <div class="card"><div class="n">{{ access_summary.verifiedFixes }}</div><div class="l">Fixes verified</div></div>
+  </div>
+  {% for d in access_diagnoses %}
+    {% set kind = {'MISSING_PERMISSION':'med','BLOCKED_BY_GUARDRAIL':'high','EXPLICIT_DENY':'high','NOW_ALLOWED':'low','AWS_MANAGED_ROLE':'grey','CANNOT_DIAGNOSE':'grey'}[d.verdict|string] %}
+    <div class="ad">
+      <div class="ad-head">
+        <span class="ad-id">{{ d.diagnosis_id }}</span> {{ badge(d.verdict, kind) }}
+        <span class="pill">{{ d.occurrences }} event(s) · {{ d.episode_ids | length }} episode(s)</span>
+      </div>
+      <div class="ad-call"><strong>{{ d.principal_arn or 'unknown principal' }}</strong><br>→ {{ d.action }} on {{ d.resource }}</div>
+      <div class="meta muted">{{ d.explanation }}</div>
+      {% if d.aws_error_reason %}<div class="small">AWS said: “{{ d.aws_error_reason }}”</div>{% endif %}
+      {% if d.simulator_decision %}
+      <div class="sim">
+        <span class="muted">Simulator, as configured today:</span>
+        <span class="step {{ 'allow' if d.simulator_decision == 'allowed' else 'deny' }}">{{ d.simulator_decision }}</span>
+        {% if d.decision_with_fix %}
+          <span class="arrow">→ with the proposed statement →</span>
+          <span class="step {{ 'allow' if d.decision_with_fix == 'allowed' else 'deny' }}">{{ d.decision_with_fix }}</span>
+          {% if d.fix_verified %}{{ badge('FIX VERIFIED', 'ok') }}{% endif %}
+        {% endif %}
+      </div>
+      {% endif %}
+      {% if d.deny_sources %}<div class="meta">Deny source(s): {% for src in d.deny_sources %}<span class="pill">{{ src }}</span>{% endfor %}</div>{% endif %}
+      {% if d.proposed_policy and d.fix_verified %}
+      <div class="small">Smallest statement that allows exactly this call (apply only if the principal should have it):</div>
+      <pre class="policy">{{ d.proposed_policy | tojson(indent=2) }}</pre>
+      {% endif %}
+      <div class="small">First seen {{ d.first_seen.strftime('%H:%M:%S') if d.first_seen else '-' }} · last seen {{ d.last_seen.strftime('%H:%M:%S') if d.last_seen else '-' }}
+        {% if d.resource_policy_evaluated %} · key policy evaluated{% endif %}</div>
+      {% if d.limitations %}<div class="small">Limits: {{ d.limitations | join(' ') }}</div>{% endif %}
+      <div class="small mono">evidence: {{ d.evidence_event_ids | join(', ') }}</div>
+    </div>
+  {% endfor %}
+  {% if not access_diagnoses %}
+  <p class="note">{{ access_summary.deniedEvents }} AccessDenied event(s) occurred, but none were diagnosed in this run.</p>
+  {% endif %}
+  {% endif %}
 
   {# 4. AI episode analyses (scrollable when long) #}
   <h2>4. Episode analyses <span class="count">({{ report.episode_analyses | length }})</span></h2>
