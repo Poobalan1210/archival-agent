@@ -10,7 +10,7 @@ Built for the AWS Builder Center *Weekend Agent Challenge*, then extended for th
 
 ## New: it explains *why* access was denied
 
-*Added for the AWS Builder Center Weekend Challenge: Give your Agent a Tool.* · **[Demo video (2:19)](https://youtu.be/yBqx_8mTaTg)** · **[Sample report](https://archival-agent-demo-report-0cfc20.s3.us-east-1.amazonaws.com/archival-agent-access-denied-sample.html)**
+*Added for the AWS Builder Center Weekend Challenge: Give your Agent a Tool.* · **[Demo video (2:20)](https://youtu.be/rWFzHubaYrg)** · **[Sample report](https://archival-agent-demo-report-0cfc20.s3.us-east-1.amazonaws.com/archival-agent-access-denied-sample.html)**
 
 `AccessDenied` is the most common failure in this agent's reports: 2,347 denied calls in October alone. Until now, the reports could only say that a call was denied, and the limitations section admitted "the specific permissions required … are not identified."
 
