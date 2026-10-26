@@ -48,10 +48,12 @@ class AnalysisResult:
     access_diagnoses: list[AccessDiagnosis] = field(default_factory=list)
 
 
-@lru_cache(maxsize=1)
-def load_system_prompt() -> str:
-    path = PROMPTS_DIR / "system_prompt.txt"
-    return path.read_text(encoding="utf-8")
+@lru_cache(maxsize=2)
+def load_system_prompt(access_diagnosis: bool = False) -> str:
+    prompt = (PROMPTS_DIR / "system_prompt.txt").read_text(encoding="utf-8")
+    if access_diagnosis:
+        prompt += "\n" + (PROMPTS_DIR / "access_diagnosis.txt").read_text(encoding="utf-8")
+    return prompt
 
 
 def build_model(config: Config):
@@ -78,7 +80,7 @@ def build_agent(config: Config, model=None):
     return Agent(
         model=model or build_model(config),
         tools=TOOLS if config.access_diagnosis_enabled else BASE_TOOLS,
-        system_prompt=load_system_prompt(),
+        system_prompt=load_system_prompt(config.access_diagnosis_enabled),
         name="archival-agent-analyst",
     )
 
@@ -190,9 +192,7 @@ def build_context_message(
         "</context>\n"
         f"{note}\n"
         "Investigate the shown significant episodes (failed, security/IAM/network, "
-        "or ambiguous) using get_episode_evidence and search_events. For episodes "
-        "whose failures are AccessDenied or UnauthorizedOperation, call "
-        "diagnose_access_denied if you have it. Be efficient: "
+        "or ambiguous) using get_episode_evidence and search_events. Be efficient: "
         "focus on the highest-impact episodes. Gather the evidence you need, then "
         "stop. Do not write the final report yet."
     )

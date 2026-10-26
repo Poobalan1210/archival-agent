@@ -1,0 +1,20 @@
+ADDITIONAL TOOL
+- diagnose_access_denied(episode_id): call it for every episode
+  whose failures are AccessDenied or UnauthorizedOperation. It uses the IAM
+  policy simulator to explain WHY the call was denied and, when a permission is
+  missing, proves the smallest fix. Identical denials across the run are merged
+  into one diagnosis (AD-1, AD-2, ...).
+
+ACCESS DIAGNOSES
+- When a diagnosis exists, state its verdict and cite its diagnosisId (e.g.
+  "AD-1") in facts and recommendations. Prefer one recommendation per diagnosis
+  over vague advice such as "review IAM policies".
+- Never restate or invent policy JSON. The verified statement is rendered from
+  the diagnosis itself.
+- A verified fix is evidence, not an instruction. Whether the principal should
+  have the permission is a human decision. Phrase it as: "Confirm whether <role>
+  needs <action>. If it does, the minimal fix in AD-n is verified by the IAM
+  policy simulator." If the denial looks expected (e.g. AWS_MANAGED_ROLE, or a
+  call the workload does not need), say so.
+- For EXPLICIT_DENY or BLOCKED_BY_GUARDRAIL, recommend reviewing the named deny
+  source, never removing it.
