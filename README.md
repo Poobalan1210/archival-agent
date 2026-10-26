@@ -35,7 +35,7 @@ ACCESS_DIAGNOSIS_ENABLED=false   # the original agent
 REPORT_BUCKET=<demo-bucket> AWS_ACCOUNT_ID=<id> python demo/before_after.py --days-ago 1
 ```
 
-The full write-up is on AWS Builder Center (Weekend Challenge: Give your Agent a Tool).
+The full write-up is on AWS Builder Center: [Archival Agent now knows why AWS access was denied, and proves the fix](https://builder.aws.com/project/3LEOoaeEsn3SWZ1z08Lcr7o43Pc/archival-agent-now-knows-why-aws-access-was-denied-and-proves-the-fix).
 
 ---
 
